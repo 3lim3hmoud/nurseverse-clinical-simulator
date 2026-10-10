@@ -1,3 +1,4 @@
+import { featuresAr } from './features-ar';
 import { extraAr } from './extra-ar';
 /** Arabic strings (same keys as en.ts). */
 export const ar: Record<string, string> = {
@@ -266,4 +267,5 @@ export const ar: Record<string, string> = {
   'tl.end': 'انتهت الحالة',
 
   ...extraAr,
+  ...featuresAr,
 };

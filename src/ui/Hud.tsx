@@ -18,6 +18,7 @@ export default function Hud({ title, objective, target, touch, panelOpen, muted 
         <strong>{title}</strong>
         <span>{objective}</span>
         {!touch && <small>{t(muted ? 'hud.soundOff' : 'hud.soundOn')}</small>}
+        {!touch && <small>{t('hud.chatHint')}</small>}
       </div>
       {!panelOpen && <div className={`crosshair${target ? ' crosshair--active' : ''}`} aria-hidden="true" />}
       {target && !panelOpen && (

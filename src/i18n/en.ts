@@ -1,3 +1,4 @@
+import { featuresEn } from './features-en';
 import { extraEn } from './extra-en';
 /** English strings. Keys are shared with ar.ts; {name} placeholders are filled by t(key, params). */
 export const en: Record<string, string> = {
@@ -280,4 +281,5 @@ export const en: Record<string, string> = {
   'tl.end': 'Case ended',
 
   ...extraEn,
+  ...featuresEn,
 };

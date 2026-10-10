@@ -1,5 +1,6 @@
 import type { SimEvent } from '../../core/EventLog';
 import { t } from '../../i18n';
+import { medById, type MedId } from '../medications';
 import { FLUIDS, type FluidType } from '../physiology/fluids';
 import { GLUCOSE_TREATMENTS, type GlucoseTreatment } from '../physiology/glucose';
 import { OXYGEN_DEVICES, type OxygenDevice } from '../physiology/oxygen';
@@ -43,6 +44,12 @@ export function buildTimeline(events: readonly SimEvent[]): TimelineRow[] {
       case 'glucose-checked': text = t('tl.glucose', { g: d.glucose }); break;
       case 'glucose-given': text = t('tl.glucoseGiven', { treatment: t(GLUCOSE_TREATMENTS[d.kind as GlucoseTreatment].labelKey) }); break;
       case 'sbar-sent': text = t('tl.sbar'); break;
+      case 'curtain-closed': text = t('tl.curtainClosed'); break;
+      case 'curtain-opened': text = t('tl.curtainOpened'); break;
+      case 'doctor-chat': text = t('tl.doctorChat'); break;
+      case 'med-ordered': text = t('tl.medOrdered', { med: t(medById(d.med as MedId).nameKey) }); break;
+      case 'med-declined': text = t('tl.medDeclined', { med: t(medById(d.med as MedId).nameKey) }); break;
+      case 'med-given': text = t('tl.medGiven', { med: t(medById(d.med as MedId).nameKey), dose: t(medById(d.med as MedId).doseKey) }); break;
       case 'alarm-silenced': text = t('tl.alarm'); break;
       case 'doctor-notified': text = t('tl.doctor', { spo2: d.spo2, sys: d.sys, dia: d.dia }); break;
       case 'patient-stabilised': text = t('tl.stable'); break;

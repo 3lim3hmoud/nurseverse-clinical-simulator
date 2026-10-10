@@ -3,6 +3,7 @@ import type { Interventions, IvInfusion } from '../physiology/interventions';
 import type { GlucoseTreatment } from '../physiology/glucose';
 import type { OxygenSetup } from '../physiology/oxygen';
 import type { PhysiologyEngine } from '../physiology';
+import { medById, type MedId } from '../medications';
 import type { PatientProfile, Vitals } from './types';
 
 type Listener = (vitals: Vitals) => void;
@@ -24,6 +25,7 @@ export class PatientModel {
   private elapsed = 0;
   private simTime = 0;
   private listeners = new Set<Listener>();
+  private drugs: { id: MedId; t0: number }[] = [];
 
   constructor(readonly profile: PatientProfile, initial: Vitals, private engine: PhysiologyEngine) {
     this.current = { ...initial };
@@ -86,6 +88,23 @@ export class PatientModel {
     this.engine.applyTreatment?.(kind);
   }
 
+  /** A medication has been given: its effect on the vitals ramps in from now. */
+  giveMedication(id: MedId): void {
+    this.drugs.push({ id, t0: this.simTime });
+  }
+
+  /** Sum of the active drug effects, each scaled by how far it has ramped in. */
+  private drugDelta(): Partial<Vitals> {
+    const sum: Partial<Vitals> = {};
+    for (const d of this.drugs) {
+      const effect = medById(d.id).effect;
+      if (!effect) continue;
+      const k = clamp((this.simTime - d.t0) / effect.rampSec, 0, 1);
+      for (const [key, value] of Object.entries(effect.delta) as [keyof Vitals, number][]) sum[key] = (sum[key] ?? 0) + value * k;
+    }
+    return sum;
+  }
+
   hangNewBag(): void {
     this.bagMl = BAG_ML;
   }
@@ -123,13 +142,14 @@ export class PatientModel {
     d.sys = step(d.sys, 3);
     d.dia = step(d.dia, 2);
 
+    const fx = this.drugDelta();
     this.current = {
-      heartRate: Math.round(raw.heartRate + d.hr),
+      heartRate: Math.round(raw.heartRate + d.hr + (fx.heartRate ?? 0)),
       spo2: Math.min(100, Math.round(raw.spo2 + d.spo2)),
       respiratoryRate: Math.max(4, Math.round(raw.respiratoryRate + d.rr)),
       systolic: Math.round(raw.systolic + d.sys),
       diastolic: Math.round(raw.diastolic + d.dia),
-      temperatureC: raw.temperatureC,
+      temperatureC: Math.round((raw.temperatureC + (fx.temperatureC ?? 0)) * 10) / 10,
     };
     this.listeners.forEach((fn) => fn(this.current));
   }
