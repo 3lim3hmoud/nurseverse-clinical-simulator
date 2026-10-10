@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SimEvent } from '../core/EventLog';
 import type { Scenario } from '../domain/scenarios';
 import { buildTimeline } from '../domain/scoring';
 import { useI18n } from '../i18n';
+import { debriefing, recordRun, summarize, type Debrief } from '../services/ai';
 import LangSwitch from './LangSwitch';
 
 interface Props {
@@ -19,6 +20,26 @@ export default function ResultsScreen({ scenario, events, onRestart, onMenu }: P
     () => ({ report: scenario.scorer.score(events, scenario), timeline: buildTimeline(events) }),
     [scenario, events, lang],
   );
+
+  const [debrief, setDebrief] = useState<Debrief | null>(null);
+  const recorded = useRef(false);
+  const progress = useMemo(() => {
+    if (!recorded.current) {
+      recorded.current = true;
+      recordRun(scenario.id, report); // the simulator remembers this run (on this device only)
+    }
+    return summarize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario, events]);
+
+  useEffect(() => {
+    let alive = true;
+    setDebrief(null);
+    void debriefing.debrief({ scenario, events, report, lang, progress }).then((d) => alive && setDebrief(d));
+    return () => {
+      alive = false;
+    };
+  }, [scenario, events, report, lang, progress]);
 
   return (
     <div className="overlay overlay--scroll" dir={dir}>
@@ -48,6 +69,37 @@ export default function ResultsScreen({ scenario, events, onRestart, onMenu }: P
             </li>
           ))}
         </ul>
+
+        {progress.runs > 1 && <p className="results__progress">{t('res.progress', { runs: progress.runs, avg: progress.averageScore })}</p>}
+        <h2>{t(debrief?.source === 'remote' ? 'deb.titleAi' : 'deb.title')}</h2>
+        {!debrief && <p className="sheet__muted">{t('deb.loading')}</p>}
+        {debrief && (
+          <div className="debrief">
+            {debrief.strengths.length > 0 && (
+              <>
+                <h3>{t('deb.strengths')}</h3>
+                <ul className="debrief__good">
+                  {debrief.strengths.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {debrief.improvements.length > 0 && (
+              <>
+                <h3>{t('deb.improve')}</h3>
+                <ul className="debrief__work">
+                  {debrief.improvements.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <p className="debrief__next">
+              <strong>{t('deb.next')}</strong> {debrief.nextStep}
+            </p>
+          </div>
+        )}
 
         <h2>{t('res.did')}</h2>
         <ol className="timeline">

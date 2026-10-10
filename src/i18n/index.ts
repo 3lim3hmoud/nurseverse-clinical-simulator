@@ -41,6 +41,9 @@ export function t(key: string, params?: Record<string, string | number>): string
   return text;
 }
 
+/** True when the English dictionary has this key (every key lives there; ar.ts mirrors it). */
+export const hasKey = (key: string): boolean => key in en;
+
 export function useLang(): Lang {
   return useSyncExternalStore(
     (fn) => {

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EventLog, type SimEvent } from './core/EventLog';
 import { PatientModel } from './domain/patient/PatientModel';
+import { GLUCOSE_TREATMENTS, glucoseStatus, type GlucoseTreatment } from './domain/physiology/glucose';
+import { buildSbar, type SbarDraft, type SbarOption } from './domain/scenarios/sbar';
 import { FLUIDS, type IvInfusion, type OxygenSetup } from './domain/physiology';
 import { OXYGEN_DEVICES } from './domain/physiology/oxygen';
 import { SCENARIOS, ScenarioSession, type Scenario, type ScenarioId } from './domain/scenarios';
 import { Simulator, type AlarmState, type InteractableInfo } from './game/Simulator';
-import { t, useLang } from './i18n';
+import { getLang, t, useLang } from './i18n';
+import { doctorService, patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
 import Hud from './ui/Hud';
 import IvPanel from './ui/IvPanel';
 import Menu from './ui/Menu';
@@ -21,6 +24,8 @@ const PANEL_FOR: Record<string, PanelId> = { 'patient-monitor': 'vitals', 'oxyge
 
 /** Phones/tablets: no keyboard or pointer lock, so we show a joystick instead. */
 const isTouchDevice = () => window.matchMedia('(pointer: coarse)').matches;
+
+const isTextField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 
 export default function App() {
   useLang(); // re-render everything when the language changes
@@ -56,6 +61,8 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   const [muted, setMuted] = useState(false);
   const [ended, setEnded] = useState<SimEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [typing, setTyping] = useState(false);
   const [, bump] = useState(0);
 
   const showToast = useCallback((message: string) => {
@@ -132,13 +139,14 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
 
   // Time only runs while the student is in the simulation (or has a panel open)
   useEffect(() => {
-    simRef.current?.setRunning(started && !ended && (locked || panel !== null));
-  }, [started, ended, locked, panel]);
+    simRef.current?.setRunning(started && !ended && !typing && (locked || panel !== null));
+  }, [started, ended, locked, panel, typing]);
 
   // Desktop: E or Esc closes the open panel
   useEffect(() => {
     if (!panel) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'KeyE' && isTextField(e.target)) return; // typing the letter "e" in the chat box
       if (e.code === 'KeyE' || e.code === 'Escape') {
         e.preventDefault();
         closePanel();
@@ -157,7 +165,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'KeyM' && !e.repeat) toggleMute();
+      if (e.code === 'KeyM' && !e.repeat && !isTextField(e.target)) toggleMute();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -212,11 +220,11 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   const actions: PatientActions = {
     ask() {
       log.record('patient-asked');
-      return scenario.findings.ask(patient.getVitals());
+      return scenario.findings.ask(patient.getVitals(), { glucose: patient.getGlucose() });
     },
     skin() {
       log.record('skin-checked');
-      return scenario.findings.skin(patient.getVitals());
+      return scenario.findings.skin(patient.getVitals(), { glucose: patient.getGlucose() });
     },
     heart() {
       log.record('heart-auscultated');
@@ -242,10 +250,44 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
       log.record('iv-checked');
       return t('msg.ivSite');
     },
-    doctor() {
+    sbarDraft() {
+      return buildSbar(scenario, patient, log.all());
+    },
+    async sendSbar(option: SbarOption, draft: SbarDraft) {
+      log.record('sbar-sent', { rec: option.id, quality: option.quality });
       const iv = patient.getInterventions();
+      const stabilised = session.isStabilised;
       session.notifyDoctor();
-      return scenario.doctorReply({ stabilised: session.isStabilised, oxygenOn: iv.oxygen !== null, ivOn: patient.isIvRunning() });
+      const scripted = scenario.doctorReply({
+        stabilised,
+        oxygenOn: iv.oxygen !== null,
+        ivOn: patient.isIvRunning(),
+        glucoseTreated: log.all().some((e) => e.type === 'glucose-given'),
+      });
+      // With the AI backend the doctor answers this exact report; otherwise (or on failure) the scripted reply is used
+      const ai = await doctorService.reply({ scenario, draft, option, stabilised, lang: getLang() });
+      return ai ? `${t('doc.prefix')} "${ai}"` : scripted;
+    },
+    checkGlucose() {
+      const g = patient.getGlucose() ?? 0;
+      log.record('glucose-checked', { glucose: g });
+      return t('msg.glucose', { g, status: t(`glu.status.${glucoseStatus(g)}`) });
+    },
+    giveGlucose(kind: GlucoseTreatment) {
+      patient.giveGlucoseTreatment(kind);
+      log.record('glucose-given', { kind });
+      return t(`msg.glucose.${kind}`, { treatment: t(GLUCOSE_TREATMENTS[kind].labelKey) });
+    },
+    async askPatient(question: string, history: readonly ChatTurn[]) {
+      const reply = await patientConversation.ask(
+        { scenario, vitals: patient.getVitals(), glucose: patient.getGlucose(), lang: getLang() },
+        question,
+        history,
+      );
+      // small talk and "I did not understand" are not history taking
+      const topics = reply.intents.filter((i) => !SMALL_TALK.includes(i));
+      if (topics.length > 0) log.record('history-asked', { intents: reply.intents });
+      return reply;
     },
     toggleHead() {
       const on = !patient.getInterventions().headElevated;
@@ -303,7 +345,18 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
         <OxygenPanel current={patient.getInterventions().oxygen} touch={touch} onApply={applyOxygen} onRemove={removeOxygen} onClose={closePanel} />
       )}
       {panel === 'iv' && <IvPanel patient={patient} touch={touch} onStart={startIv} onStop={stopIv} onNewBag={newBag} onClose={closePanel} />}
-      {panel === 'patient' && <PatientPanel patient={patient} touch={touch} actions={actions} onClose={closePanel} />}
+      {panel === 'patient' && (
+        <PatientPanel
+          patient={patient}
+          touch={touch}
+          hasGlucometer={scenario.tools?.glucometer === true}
+          actions={actions}
+          turns={turns}
+          onTurns={setTurns}
+          onTypingChange={setTyping}
+          onClose={closePanel}
+        />
+      )}
 
       {toast && (
         <div className="toast" role="status">

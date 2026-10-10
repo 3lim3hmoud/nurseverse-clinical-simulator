@@ -341,3 +341,39 @@ body {
 .bagbar { height: 10px; margin: 0 16px 6px; border-radius: 6px; background: var(--mist); border: 1px solid var(--line); overflow: hidden; }
 .bagbar div { height: 100%; background: #6bbfd9; transition: width 0.4s linear; }
 .sheet__actions .btn { text-align: center; }
+
+/* ---------- Patient tabs, interview chat, SBAR, debrief ---------- */
+.tabs { display: flex; gap: 6px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); }
+.tab { padding: 8px 14px; border: 0; border-bottom: 3px solid transparent; background: none; font: 600 14px inherit; color: var(--ink-soft); cursor: pointer; }
+.tab--on { color: var(--teal-dark); border-bottom-color: var(--teal); }
+
+.chat { display: grid; gap: 8px; padding: 10px 16px 6px; }
+.chat__log { display: flex; flex-direction: column; gap: 8px; min-height: 120px; max-height: 240px; overflow: auto; padding: 8px; border-radius: 10px; background: var(--mist); }
+.bubble { max-width: 86%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.bubble--nurse { align-self: flex-end; background: var(--teal); color: #fff; border-end-end-radius: 4px; }
+.bubble--patient { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-end-start-radius: 4px; }
+.bubble--typing { color: var(--ink-soft); letter-spacing: 2px; }
+.chat__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip--q { min-width: 0; padding: 6px 10px; font-size: 12.5px; }
+.chip--q:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat__form { display: flex; gap: 8px; }
+.chat__form input { flex: 1; min-width: 0; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: 14px inherit; color: var(--ink); }
+.chat__form input:focus { outline: 3px solid #3fd0c9; outline-offset: 1px; border-color: var(--teal); }
+.chat__form .btn { padding: 10px 14px; }
+.chat__note { margin: 0; font-size: 12px; }
+
+.sbar { display: grid; gap: 6px; padding: 6px 0 0; }
+.sbar__intro { margin: 6px 16px 0; }
+.sbar__block { margin: 0 16px; padding: 8px 10px; border-radius: 10px; background: var(--mist); }
+.sbar__block h3 { margin: 0 0 4px; font-size: 13px; color: var(--teal-dark); }
+.sbar__block p, .sbar__block li { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.sbar__block ul { margin: 0; padding-inline-start: 18px; }
+.sbar__block .choices { padding: 0; }
+
+.debrief { margin: 0 0 14px; padding: 12px 14px; border-radius: 12px; background: var(--mist); }
+.debrief h3 { margin: 8px 0 4px; font-size: 14px; }
+.debrief ul { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; font-size: 14px; line-height: 1.45; }
+.debrief__good li::marker { color: #1f9d6a; }
+.debrief__work li::marker { color: var(--warn); }
+.debrief__next { margin: 10px 0 0; font-size: 14px; line-height: 1.45; }
+.results__progress { margin: 0 0 8px; font-size: 13.5px; color: var(--ink-soft); }

@@ -47,7 +47,9 @@ export class ScenarioSession {
     if (this.status !== 'running' || dt <= 0) return;
     const v = this.patient.getVitals();
 
-    if (this.scenario.isStable(v, this.patient.getInterventions())) this.stableFor += dt;
+    const x = { glucose: this.patient.getGlucose() };
+
+    if (this.scenario.isStable(v, this.patient.getInterventions(), x)) this.stableFor += dt;
     else this.stableFor = 0;
 
     if (!this.stabilised && this.stableFor >= this.scenario.stableSeconds) {
@@ -57,7 +59,7 @@ export class ScenarioSession {
     }
 
     if (this.stabilised && this.doctorNotified) this.end('stabilized');
-    else if (this.scenario.isFailed(v)) this.end('deteriorated');
+    else if (this.scenario.isFailed(v, x)) this.end('deteriorated');
     else if (this.patient.getSimTime() >= this.scenario.timeLimitSec) this.end('timeout');
   }
 

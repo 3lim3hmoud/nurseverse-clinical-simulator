@@ -1,3 +1,4 @@
+import { extraEn } from './extra-en';
 /** English strings. Keys are shared with ar.ts; {name} placeholders are filled by t(key, params). */
 export const en: Record<string, string> = {
   'app.title': 'NurseVerse Clinical Simulator',
@@ -277,4 +278,6 @@ export const en: Record<string, string> = {
   'tl.doctor': 'Notified the doctor (SpO₂ {spo2}%, BP {sys}/{dia})',
   'tl.stable': 'The patient stabilised',
   'tl.end': 'Case ended',
+
+  ...extraEn,
 };
