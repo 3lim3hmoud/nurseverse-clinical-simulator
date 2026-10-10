@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EventLog, type SimEvent } from './core/EventLog';
 import { PatientModel } from './domain/patient/PatientModel';
 import { GLUCOSE_TREATMENTS, glucoseStatus, type GlucoseTreatment } from './domain/physiology/glucose';
-import { buildSbar, type SbarOption } from './domain/scenarios/sbar';
+import { buildSbar, type SbarDraft, type SbarOption } from './domain/scenarios/sbar';
 import { FLUIDS, type IvInfusion, type OxygenSetup } from './domain/physiology';
 import { OXYGEN_DEVICES } from './domain/physiology/oxygen';
 import { SCENARIOS, ScenarioSession, type Scenario, type ScenarioId } from './domain/scenarios';
 import { Simulator, type AlarmState, type InteractableInfo } from './game/Simulator';
 import { getLang, t, useLang } from './i18n';
-import { patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
+import { doctorService, patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
 import Hud from './ui/Hud';
 import IvPanel from './ui/IvPanel';
 import Menu from './ui/Menu';
@@ -253,16 +253,20 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
     sbarDraft() {
       return buildSbar(scenario, patient, log.all());
     },
-    sendSbar(option: SbarOption) {
+    async sendSbar(option: SbarOption, draft: SbarDraft) {
       log.record('sbar-sent', { rec: option.id, quality: option.quality });
       const iv = patient.getInterventions();
+      const stabilised = session.isStabilised;
       session.notifyDoctor();
-      return scenario.doctorReply({
-        stabilised: session.isStabilised,
+      const scripted = scenario.doctorReply({
+        stabilised,
         oxygenOn: iv.oxygen !== null,
         ivOn: patient.isIvRunning(),
         glucoseTreated: log.all().some((e) => e.type === 'glucose-given'),
       });
+      // With the AI backend the doctor answers this exact report; otherwise (or on failure) the scripted reply is used
+      const ai = await doctorService.reply({ scenario, draft, option, stabilised, lang: getLang() });
+      return ai ? `${t('doc.prefix')} "${ai}"` : scripted;
     },
     checkGlucose() {
       const g = patient.getGlucose() ?? 0;

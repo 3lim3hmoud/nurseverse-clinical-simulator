@@ -376,3 +376,4 @@ body {
 .debrief__good li::marker { color: #1f9d6a; }
 .debrief__work li::marker { color: var(--warn); }
 .debrief__next { margin: 10px 0 0; font-size: 14px; line-height: 1.45; }
+.results__progress { margin: 0 0 8px; font-size: 13.5px; color: var(--ink-soft); }

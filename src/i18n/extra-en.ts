@@ -221,4 +221,8 @@ export const extraEn: Record<string, string> = {
   'tip.respiratory': 'Start low-flow oxygen early, sit the patient upright, recheck the SpO₂ within two minutes, and adjust the device to the reading.',
   'tip.shock': 'Give a crystalloid bolus quickly, raise the legs, recheck the blood pressure soon after, and ask about the cause (vomiting, diarrhoea, urine output).',
   'tip.hypoglycemia': 'Always check the blood sugar before treating, give fast-acting carbohydrate, recheck after about 15 minutes, then give a longer-acting snack.',
+  'pt.waitDoctor': 'Calling the doctor...',
+  'doc.prefix': 'Doctor:',
+  'res.progress': 'Your average over {runs} runs on this device: {avg} / 100.',
+  'deb.recurring': 'This keeps coming up in your recent runs: {items}.',
 };

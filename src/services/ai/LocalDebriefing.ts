@@ -13,7 +13,7 @@ export function askedTopics(events: DebriefInput['events']): Set<string> {
 }
 
 /** Offline debrief built from the score report and the event log. */
-export function buildLocalDebrief({ scenario, events, report }: DebriefInput): Debrief {
+export function buildLocalDebrief({ scenario, events, report, progress }: DebriefInput): Debrief {
   const strengths = report.items.filter((i) => i.points === i.maxPoints).slice(0, 3).map((i) => `${i.label}: ${i.feedback}`);
   const improvements = report.items
     .filter((i) => i.points < i.maxPoints)
@@ -35,6 +35,10 @@ export function buildLocalDebrief({ scenario, events, report }: DebriefInput): D
   if (quality === 2) strengths.push(t('deb.sbar.best'));
   else if (quality === 1) improvements.push(t('deb.sbar.ok'));
   else if (quality === 0) improvements.push(t('deb.sbar.bad'));
+
+  // What keeps coming back across the student's recent runs
+  const recurring = (progress?.recurringWeak ?? []).filter((id) => report.items.some((i) => i.id === id && i.points < i.maxPoints));
+  if (recurring.length > 0) improvements.unshift(t('deb.recurring', { items: recurring.map((id) => t(id)).join(', ') }));
 
   return { strengths, improvements, nextStep: t(scenario.debriefTipKey), source: 'local' };
 }

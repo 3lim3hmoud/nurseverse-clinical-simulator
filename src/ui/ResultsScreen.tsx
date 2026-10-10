@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SimEvent } from '../core/EventLog';
 import type { Scenario } from '../domain/scenarios';
 import { buildTimeline } from '../domain/scoring';
 import { useI18n } from '../i18n';
-import { debriefing, type Debrief } from '../services/ai';
+import { debriefing, recordRun, summarize, type Debrief } from '../services/ai';
 import LangSwitch from './LangSwitch';
 
 interface Props {
@@ -22,14 +22,24 @@ export default function ResultsScreen({ scenario, events, onRestart, onMenu }: P
   );
 
   const [debrief, setDebrief] = useState<Debrief | null>(null);
+  const recorded = useRef(false);
+  const progress = useMemo(() => {
+    if (!recorded.current) {
+      recorded.current = true;
+      recordRun(scenario.id, report); // the simulator remembers this run (on this device only)
+    }
+    return summarize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario, events]);
+
   useEffect(() => {
     let alive = true;
     setDebrief(null);
-    void debriefing.debrief({ scenario, events, report, lang }).then((d) => alive && setDebrief(d));
+    void debriefing.debrief({ scenario, events, report, lang, progress }).then((d) => alive && setDebrief(d));
     return () => {
       alive = false;
     };
-  }, [scenario, events, report, lang]);
+  }, [scenario, events, report, lang, progress]);
 
   return (
     <div className="overlay overlay--scroll" dir={dir}>
@@ -60,6 +70,7 @@ export default function ResultsScreen({ scenario, events, onRestart, onMenu }: P
           ))}
         </ul>
 
+        {progress.runs > 1 && <p className="results__progress">{t('res.progress', { runs: progress.runs, avg: progress.averageScore })}</p>}
         <h2>{t(debrief?.source === 'remote' ? 'deb.titleAi' : 'deb.title')}</h2>
         {!debrief && <p className="sheet__muted">{t('deb.loading')}</p>}
         {debrief && (

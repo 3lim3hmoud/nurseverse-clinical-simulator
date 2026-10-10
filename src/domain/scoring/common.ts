@@ -37,7 +37,7 @@ export class Events {
 export class ItemList {
   items: ScoreItem[] = [];
   add(label: string, points: number, maxPoints: number, feedback: string): void {
-    this.items.push({ label: t(label), points, maxPoints, feedback });
+    this.items.push({ id: label, label: t(label), points, maxPoints, feedback });
   }
 }
 

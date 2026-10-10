@@ -18,7 +18,7 @@ export interface PatientActions {
   bp(): string;
   ivSite(): string;
   sbarDraft(): SbarDraft;
-  sendSbar(option: SbarOption): string;
+  sendSbar(option: SbarOption, draft: SbarDraft): Promise<string>;
   checkGlucose(): string;
   giveGlucose(kind: GlucoseTreatment): string;
   askPatient(question: string, history: readonly ChatTurn[]): Promise<PatientReply>;
@@ -82,8 +82,9 @@ export default function PatientPanel({ patient, touch, hasGlucometer, actions, t
           draft={draft}
           onBack={() => setTab('examine')}
           onSend={(option) => {
-            setResponse(actions.sendSbar(option));
+            setResponse(t('pt.waitDoctor'));
             setTab('examine');
+            void actions.sendSbar(option, draft).then(setResponse);
           }}
         />
       )}

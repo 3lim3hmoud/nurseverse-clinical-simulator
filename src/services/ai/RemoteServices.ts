@@ -1,15 +1,18 @@
 import { detectIntents } from './intents';
-import type { ChatTurn, Debrief, DebriefInput, DebriefingService, PatientContext, PatientConversationService, PatientReply } from './types';
+import { buildFacts } from './LocalPatientConversation';
+import type { ChatTurn, Debrief, DebriefInput, DebriefingService, DoctorContext, DoctorService, PatientContext, PatientConversationService, PatientReply } from './types';
 
 /**
  * Optional LLM backends. They talk to YOUR OWN endpoint (set VITE_AI_ENDPOINT at build time), never to a model
  * provider directly: an API key must never ship inside a browser app. If the endpoint fails or is slow, the
  * offline service answers instead, so the simulator always works.
  *
- * POST {endpoint}  Content-Type: application/json
- *   patient:  { kind: "patient", lang, scenarioId, patient: { ageYears, sex }, vitals, glucose?, question, history }
+ * The reference backend is api/ai.ts (Vercel). POST {endpoint}  Content-Type: application/json
+ *   patient:  { kind: "patient", lang, scenarioId, patient: { ageYears, sex }, facts, state, question, history }
  *             -> { "text": "<the patient's answer, in the requested language>" }
- *   debrief:  { kind: "debrief", lang, scenarioId, score, items: [{ label, points, maxPoints, feedback }], events }
+ *   doctor:   { kind: "doctor", lang, scenarioId, stabilised, report: { situation, background, assessment, recommendation } }
+ *             -> { "text": "<the doctor's reply>" }
+ *   debrief:  { kind: "debrief", lang, scenarioId, score, items, events, progress }
  *             -> { "strengths": string[], "improvements": string[], "nextStep": string }
  */
 async function post(endpoint: string, body: unknown, timeoutMs: number): Promise<unknown> {
@@ -38,8 +41,7 @@ export class RemotePatientConversation implements PatientConversationService {
           lang: ctx.lang,
           scenarioId: ctx.scenario.id,
           patient: { ageYears: ctx.scenario.patient.ageYears, sex: ctx.scenario.patient.sex },
-          vitals: ctx.vitals,
-          glucose: ctx.glucose,
+          ...buildFacts(ctx),
           question,
           history: history.slice(-8),
         },
@@ -67,6 +69,7 @@ export class RemoteDebriefing implements DebriefingService {
           score: input.report.total,
           items: input.report.items,
           events: input.events,
+          progress: input.progress,
         },
         this.timeoutMs,
       )) as Partial<Debrief>;
@@ -74,6 +77,29 @@ export class RemoteDebriefing implements DebriefingService {
       return { strengths: data.strengths, improvements: data.improvements, nextStep: data.nextStep, source: 'remote' };
     } catch {
       return this.fallback.debrief(input);
+    }
+  }
+}
+
+export class RemoteDoctor implements DoctorService {
+  constructor(private endpoint: string, private timeoutMs = 10000) {}
+
+  async reply(ctx: DoctorContext): Promise<string | null> {
+    try {
+      const data = (await post(
+        this.endpoint,
+        {
+          kind: 'doctor',
+          lang: ctx.lang,
+          scenarioId: ctx.scenario.id,
+          stabilised: ctx.stabilised,
+          report: { situation: ctx.draft.situation, background: ctx.draft.background, assessment: ctx.draft.assessment, recommendation: ctx.option.label },
+        },
+        this.timeoutMs,
+      )) as { text?: unknown };
+      return typeof data.text === 'string' && data.text.trim() ? data.text.trim() : null;
+    } catch {
+      return null;
     }
   }
 }
