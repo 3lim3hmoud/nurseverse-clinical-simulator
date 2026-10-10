@@ -377,3 +377,47 @@ body {
 .debrief__work li::marker { color: var(--warn); }
 .debrief__next { margin: 10px 0 0; font-size: 14px; line-height: 1.45; }
 .results__progress { margin: 0 0 8px; font-size: 13.5px; color: var(--ink-soft); }
+
+/* ---------- Doctor chat + medication cart ---------- */
+.bubble--doctor { align-self: flex-start; background: #eef6ff; border: 1px solid #c7ddf5; border-end-start-radius: 4px; }
+
+.meds { list-style: none; margin: 0; padding: 4px 16px 0; display: grid; gap: 8px; }
+.med {
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'info btn' 'tag btn';
+  align-items: center; gap: 2px 10px; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: 10px; background: #fff;
+}
+.med__info { grid-area: info; display: grid; }
+.med__info strong { font-size: 14px; }
+.med__info span { font-size: 12.5px; color: var(--ink-soft); }
+.med__btn { grid-area: btn; padding: 8px 12px; text-align: center; white-space: nowrap; }
+.med__tag { grid-area: tag; font-size: 12px; color: var(--ink-soft); }
+.med__tag--ok { color: #1f9d6a; font-weight: 600; }
+.med__tag--done { grid-area: btn; color: #1f9d6a; font-weight: 700; font-size: 13px; }
+
+/* ---------- Phones and tablets ---------- */
+@supports (padding: env(safe-area-inset-top)) {
+  .sheet { top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); }
+  .touch__top { top: max(10px, env(safe-area-inset-top)); }
+  .hud__info { top: max(16px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); }
+}
+@media (pointer: coarse) {
+  /* 16px stops iOS from zooming into the field; 44px is a comfortable tap size */
+  .chat__form input { font-size: 16px; min-height: 44px; }
+  .tab { padding: 12px 16px; }
+  .chip--q { padding: 10px 14px; font-size: 13.5px; }
+  .btn, .sheet__foot button, .touch__top button { min-height: 44px; }
+  .sheet__foot button { padding: 8px 18px; }
+  .touch__top button { padding: 6px 14px; }
+}
+@media (max-height: 520px) {
+  .chat { padding: 8px 12px 4px; gap: 6px; }
+  .chat__log { min-height: 64px; max-height: 24dvh; }
+  .chat__chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .chip--q { flex: none; }
+  .chat__note { display: none; }
+  .meds { padding: 4px 12px 0; gap: 6px; }
+  .med { padding: 6px 10px; }
+  .tabs { padding: 4px 12px 0; }
+  .tab { padding: 8px 14px; }
+}

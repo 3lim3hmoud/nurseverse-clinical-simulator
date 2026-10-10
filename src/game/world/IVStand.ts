@@ -1,16 +1,93 @@
 import * as THREE from 'three';
 import { blobShadow, box, cyl, lambert, sphere } from './helpers';
+import { cloneModel, findMesh, localBox, ownMaterial } from './models';
 
 export interface IvRig {
   group: THREE.Group;
+  bagPort: THREE.Object3D; // where the infusion line leaves the bag
   setLevel(fraction: number): void; // fluid left in the bag, 0..1
   setRunning(on: boolean): void;
   setHighlight(on: boolean): void;
   update(dt: number): void;
 }
 
-/** IV pole with bag, drip chamber and infusion pump. Origin = floor. Bag port is at local (0, 1.64, 0). */
+/** IV pole with bag, drip chamber and infusion pump. Origin = floor, pump faces +z. */
 export function createIVStand(): IvRig {
+  return createFromModel() ?? createProcedural();
+}
+
+function createFromModel(): IvRig | null {
+  const model = cloneModel('ivStand');
+  const bag = model ? findMesh(model, 'IVBag0') : undefined;
+  if (!model || !bag) return null;
+
+  const g = new THREE.Group();
+  g.add(blobShadow(0.9, 0.9, 0, 0));
+
+  // The bag hangs from its top, so it shrinks downwards: scale a pivot placed at the top edge
+  const bagBox = localBox(model, 'IVBag0')!;
+  const pivot = new THREE.Group();
+  pivot.position.set((bagBox.min.x + bagBox.max.x) / 2, bagBox.max.y, (bagBox.min.z + bagBox.max.z) / 2);
+  model.add(pivot);
+  pivot.attach(bag);
+
+  const bagPort = new THREE.Object3D();
+  const portBox = localBox(model, 'IVPort0');
+  bagPort.position.copy(portBox ? new THREE.Vector3((portBox.min.x + portBox.max.x) / 2, portBox.min.y, (portBox.min.z + portBox.max.z) / 2) : new THREE.Vector3(-0.14, 1.66, 0));
+  model.add(bagPort);
+
+  const chamber = localBox(model, 'DripChamber');
+  const dropX = chamber ? (chamber.min.x + chamber.max.x) / 2 : 0;
+  const dropZ = chamber ? (chamber.min.z + chamber.max.z) / 2 : -0.03;
+  const dropTop = chamber ? chamber.max.y - 0.02 : 1.61;
+  const dropSpan = chamber ? Math.max(0.03, chamber.max.y - chamber.min.y - 0.05) : 0.05;
+  const drop = sphere(0.004, 0x66c8e8, dropX, dropTop, dropZ, 6);
+  drop.visible = false;
+  model.add(drop);
+
+  const pumpMat = ownMaterial(model, 'Pump');
+  const screenMat = ownMaterial<THREE.MeshBasicMaterial>(model, 'PumpScreen');
+  const ledMat = ownMaterial(model, 'PumpLED');
+  const ledOff = ledMat ? { color: ledMat.color.clone(), emissive: ledMat.emissive.clone() } : null;
+  screenMat?.color.setHex(0x6b777d);
+
+  model.rotation.y = Math.PI; // models face -z, the pump must face +z
+  g.add(model);
+
+  // Invisible, larger hit area so the pole is easy to target
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(0.6, 2.0, 0.6), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.y = 1.0;
+  g.add(hit);
+
+  let time = 0;
+  let running = false;
+  return {
+    group: g,
+    bagPort,
+    setLevel(fraction) {
+      pivot.scale.y = Math.max(0.02, Math.min(1, fraction));
+    },
+    setRunning(on) {
+      running = on;
+      drop.visible = on;
+      screenMat?.color.setHex(on ? 0xffffff : 0x6b777d);
+      if (ledMat && ledOff) {
+        ledMat.color.copy(on ? new THREE.Color(0x2bd67b) : ledOff.color);
+        ledMat.emissive.copy(on ? new THREE.Color(0x14a85a) : ledOff.emissive);
+      }
+    },
+    setHighlight(on) {
+      pumpMat?.emissive.setHex(on ? 0x1b8f93 : 0x000000);
+    },
+    update(dt) {
+      if (!running) return;
+      time += dt;
+      drop.position.y = dropTop - ((time * 2.5) % 1) * dropSpan;
+    },
+  };
+}
+
+function createProcedural(): IvRig {
   const g = new THREE.Group();
   const STEEL = 0xc5ced2;
 
@@ -64,10 +141,15 @@ export function createIVStand(): IvRig {
   hit.position.y = 1.0;
   g.add(hit);
 
+  const bagPort = new THREE.Object3D();
+  bagPort.position.set(0, 1.64, 0);
+  g.add(bagPort);
+
   let time = 0;
   let running = false;
   return {
     group: g,
+    bagPort,
     setLevel(fraction) {
       fluid.scale.y = Math.max(0.02, Math.min(1, fraction));
     },

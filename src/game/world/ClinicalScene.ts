@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import type { PatientProfile } from '../../domain/patient/types';
 import type { OxygenSetup } from '../../domain/physiology/oxygen';
-import { BED_POS, IV_POS, MONITOR_POS, OXYGEN_POS, rectAround, type Rect } from '../layout';
+import { BED_POS, IV_POS, MONITOR_POS, OXYGEN_POS, ROOM, rectAround, type Rect } from '../layout';
 import { createBed, type BedRig } from './Bed';
 import { Cable } from './Cable';
 import { buildEmergencyRoom } from './EmergencyRoom';
 import { createIVStand, type IvRig } from './IVStand';
+import { createMedicationCart, type MedCartRig } from './MedicationCart';
 import { createOxygenDevice, type OxygenRig } from './OxygenDevice';
 import { createPatient, type PatientRig } from './Patient';
 import { createPatientMonitor, type PatientMonitor } from './PatientMonitor';
+import { createPrivacyCurtains, type CurtainRig } from './PrivacyCurtains';
 
 export interface ClinicalScene {
   scene: THREE.Scene;
@@ -19,6 +21,8 @@ export interface ClinicalScene {
   monitor: PatientMonitor;
   oxygen: OxygenRig;
   iv: IvRig;
+  curtains: CurtainRig;
+  medCart: MedCartRig;
   setLegAngle(angle: number): void;
   setHeadAngle(angle: number): void;
   setOxygenVisual(setup: OxygenSetup | null): void;
@@ -62,10 +66,21 @@ export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
   scene.add(monitor.group);
   colliders.push(rectAround(MONITOR_POS.x, MONITOR_POS.z, 0.28, 0.28));
 
+  const curtains = createPrivacyCurtains(ROOM.height);
+  scene.add(curtains.group);
+  colliders.push(...curtains.colliders); // same objects: the rig switches them on and off
+
   const iv = createIVStand();
   iv.group.position.copy(IV_POS);
   scene.add(iv.group);
   colliders.push(rectAround(IV_POS.x, IV_POS.z, 0.3, 0.3));
+
+  // Medication cart in the back right corner of the bed area, drawers facing the bed
+  const medCart = createMedicationCart();
+  medCart.group.position.set(2.55, 0, -2.4);
+  medCart.group.rotation.y = -Math.PI / 2;
+  scene.add(medCart.group);
+  colliders.push({ minX: 2.25, maxX: 2.85, minZ: -2.75, maxZ: -2.0 });
 
   const oxygen = createOxygenDevice();
   oxygen.group.position.copy(OXYGEN_POS);
@@ -85,7 +100,7 @@ export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
 
   addCable(
     () => [
-      rel(IV_POS, 0, 1.64, 0),
+      world(iv.bagPort),
       rel(IV_POS, 0, 1.5, 0.06),
       rel(IV_POS, 0.1, 1.2, 0.12),
       rel(IV_POS, 0.3, 1.0, 0.06),
@@ -123,6 +138,8 @@ export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
     monitor,
     oxygen,
     iv,
+    curtains,
+    medCart,
     setLegAngle(angle) {
       bed.setLegAngle(angle);
       patient.setLegAngle(angle);

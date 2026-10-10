@@ -77,12 +77,14 @@ export function disposeScene(root: THREE.Object3D): void {
   const shared = new Set<THREE.Material>(cache.values());
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
+    // Models from models.ts are loaded once and reused by the next scene: never dispose their shared parts
+    if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
     const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
     if (!mat) return;
     (Array.isArray(mat) ? mat : [mat]).forEach((m) => {
-      if (shared.has(m)) return;
-      (m as THREE.MeshBasicMaterial).map?.dispose();
+      if (shared.has(m) || m.userData.shared) return;
+      const map = (m as THREE.MeshBasicMaterial).map;
+      if (map && !map.userData.shared) map.dispose();
       m.dispose();
     });
   });

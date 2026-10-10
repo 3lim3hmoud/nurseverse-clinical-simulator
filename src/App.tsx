@@ -2,16 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EventLog, type SimEvent } from './core/EventLog';
 import { PatientModel } from './domain/patient/PatientModel';
 import { GLUCOSE_TREATMENTS, glucoseStatus, type GlucoseTreatment } from './domain/physiology/glucose';
+import { medById, type MedId } from './domain/medications';
+import { ASSESSMENT_EVENTS } from './domain/scoring/common';
 import { buildSbar, type SbarDraft, type SbarOption } from './domain/scenarios/sbar';
 import { FLUIDS, type IvInfusion, type OxygenSetup } from './domain/physiology';
 import { OXYGEN_DEVICES } from './domain/physiology/oxygen';
 import { SCENARIOS, ScenarioSession, type Scenario, type ScenarioId } from './domain/scenarios';
 import { Simulator, type AlarmState, type InteractableInfo } from './game/Simulator';
-import { getLang, t, useLang } from './i18n';
-import { doctorService, patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
+import { getLang, hasKey, t, useLang } from './i18n';
+import { doctorChat, doctorService, patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
+import ChatPanel from './ui/ChatPanel';
 import Hud from './ui/Hud';
 import IvPanel from './ui/IvPanel';
 import Menu from './ui/Menu';
+import MedsPanel from './ui/MedsPanel';
 import OxygenPanel from './ui/OxygenPanel';
 import PatientPanel, { type PatientActions } from './ui/PatientPanel';
 import ResultsScreen from './ui/ResultsScreen';
@@ -19,8 +23,8 @@ import StartOverlay from './ui/StartOverlay';
 import TouchControls from './ui/TouchControls';
 import VitalsPanel from './ui/VitalsPanel';
 
-type PanelId = 'vitals' | 'oxygen' | 'patient' | 'iv';
-const PANEL_FOR: Record<string, PanelId> = { 'patient-monitor': 'vitals', 'oxygen-device': 'oxygen', patient: 'patient', 'iv-stand': 'iv' };
+type PanelId = 'vitals' | 'oxygen' | 'patient' | 'iv' | 'meds' | 'chat';
+const PANEL_FOR: Record<string, PanelId> = { 'patient-monitor': 'vitals', 'oxygen-device': 'oxygen', patient: 'patient', 'iv-stand': 'iv', 'med-cart': 'meds' };
 
 /** Phones/tablets: no keyboard or pointer lock, so we show a joystick instead. */
 const isTouchDevice = () => window.matchMedia('(pointer: coarse)').matches;
@@ -62,6 +66,9 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   const [ended, setEnded] = useState<SimEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [doctorTurns, setDoctorTurns] = useState<ChatTurn[]>([]);
+  const [orders, setOrders] = useState<MedId[]>([]);
+  const [given, setGiven] = useState<MedId[]>([]);
   const [typing, setTyping] = useState(false);
   const [, bump] = useState(0);
 
@@ -105,6 +112,12 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
           }
         },
         onInteract: (tgt) => {
+          if (tgt?.id === 'curtain') {
+            const closed = sim.toggleCurtains();
+            log.record(closed ? 'curtain-closed' : 'curtain-opened');
+            showToast(t(closed ? 'toast.curtainClosed' : 'toast.curtainOpened'));
+            return;
+          }
           const id = tgt ? PANEL_FOR[tgt.id] : undefined;
           if (id) openPanel(id);
         },
@@ -166,10 +179,14 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'KeyM' && !e.repeat && !isTextField(e.target)) toggleMute();
+      if (e.code === 'KeyT' && !e.repeat && !isTextField(e.target) && started && !ended && !panel) {
+        e.preventDefault();
+        openPanel('chat');
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleMute]);
+  }, [toggleMute, started, ended, panel, openPanel]);
 
   // ---- nursing actions ----
   const sys = () => patient.getVitals().systolic;
@@ -303,6 +320,55 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
     },
   };
 
+  // ---- doctor chat + medications ----
+  const askDoctorChat = async (question: string, history: readonly ChatTurn[]) => {
+    const iv = patient.getInterventions();
+    const reply = await doctorChat.ask(
+      {
+        scenario,
+        vitals: patient.getVitals(),
+        glucose: patient.getGlucose(),
+        lang: getLang(),
+        assessed: log.all().some((e) => ASSESSMENT_EVENTS.includes(e.type)),
+        oxygenOn: iv.oxygen !== null,
+        ivOn: patient.isIvRunning(),
+        glucoseTreated: log.all().some((e) => e.type === 'glucose-given'),
+      },
+      question,
+      history,
+    );
+    if (!log.all().some((e) => e.type === 'doctor-chat')) log.record('doctor-chat');
+    if (reply.order) {
+      const { medId, approved } = reply.order;
+      if (!log.all().some((e) => e.type === (approved ? 'med-ordered' : 'med-declined') && e.data?.med === medId)) {
+        log.record(approved ? 'med-ordered' : 'med-declined', { med: medId });
+      }
+      if (approved) setOrders((o) => (o.includes(medId) ? o : [...o, medId]));
+    }
+    return reply;
+  };
+
+  /** Ask for an order from the medication cart: the exchange also appears in the doctor chat. */
+  const requestMed = async (id: MedId) => {
+    const question = t('dchat.askMed', { med: t(medById(id).nameKey) });
+    const reply = await askDoctorChat(question, doctorTurns);
+    setDoctorTurns((prev) => [...prev, { from: 'nurse', text: question }, { from: 'doctor', text: reply.text }]);
+    return `${t('doc.prefix')} \"${reply.text}\"`;
+  };
+
+  const giveMed = (id: MedId) => {
+    if (!orders.includes(id)) {
+      log.record('med-blocked', { med: id });
+      return t('meds.noOrder');
+    }
+    const med = medById(id);
+    patient.giveMedication(id);
+    setGiven((g) => (g.includes(id) ? g : [...g, id]));
+    log.record('med-given', { med: id });
+    const extra = hasKey(`msg.med.${id}`) ? ` ${t(`msg.med.${id}`)}` : '';
+    return t('msg.med.given', { med: t(med.nameKey), dose: t(med.doseKey) }) + extra;
+  };
+
   // ---- start / resume ----
   const start = () => {
     const sim = simRef.current;
@@ -335,6 +401,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
           onLook={(dx, dy) => simRef.current?.look(dx, dy)}
           onInteract={() => simRef.current?.interact()}
           onPause={() => simRef.current?.stopTouch()}
+          onChat={() => openPanel('chat')}
           muted={muted}
           onToggleMute={toggleMute}
         />
@@ -345,6 +412,30 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
         <OxygenPanel current={patient.getInterventions().oxygen} touch={touch} onApply={applyOxygen} onRemove={removeOxygen} onClose={closePanel} />
       )}
       {panel === 'iv' && <IvPanel patient={patient} touch={touch} onStart={startIv} onStop={stopIv} onNewBag={newBag} onClose={closePanel} />}
+      {panel === 'meds' && (
+        <MedsPanel
+          touch={touch}
+          ordered={orders}
+          given={given}
+          glucoseHint={scenario.tools?.glucometer === true}
+          onAsk={requestMed}
+          onGive={giveMed}
+          onClose={closePanel}
+        />
+      )}
+      {panel === 'chat' && (
+        <ChatPanel
+          touch={touch}
+          patientTurns={turns}
+          doctorTurns={doctorTurns}
+          onPatientTurns={setTurns}
+          onDoctorTurns={setDoctorTurns}
+          askPatient={actions.askPatient}
+          askDoctor={askDoctorChat}
+          onTypingChange={setTyping}
+          onClose={closePanel}
+        />
+      )}
       {panel === 'patient' && (
         <PatientPanel
           patient={patient}

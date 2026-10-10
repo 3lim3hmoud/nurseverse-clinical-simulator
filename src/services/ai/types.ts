@@ -5,6 +5,7 @@ import type { Scenario } from '../../domain/scenarios';
 import type { ScoreReport } from '../../domain/scoring';
 import type { Intent } from './intents';
 import type { SbarDraft, SbarOption } from '../../domain/scenarios/sbar';
+import type { MedId } from '../../domain/medications';
 import type { ProgressSummary } from './progress';
 
 export interface PatientContext {
@@ -15,7 +16,7 @@ export interface PatientContext {
 }
 
 export interface ChatTurn {
-  from: 'nurse' | 'patient';
+  from: 'nurse' | 'patient' | 'doctor';
   text: string;
 }
 
@@ -61,4 +62,29 @@ export interface DoctorContext {
 /** The on-call doctor answers the nurse's SBAR report. Returns null when there is no AI reply (the scripted reply is used). */
 export interface DoctorService {
   reply(ctx: DoctorContext): Promise<string | null>;
+}
+
+/** What the on-call doctor knows when the nurse messages them. */
+export interface DoctorChatContext {
+  scenario: Scenario;
+  vitals: Vitals;
+  glucose?: number;
+  lang: Lang;
+  /** The nurse has examined the patient at least once. */
+  assessed: boolean;
+  oxygenOn: boolean;
+  ivOn: boolean;
+  glucoseTreated: boolean;
+}
+
+export interface DoctorChatReply {
+  text: string;
+  /** Set when the nurse asked for a medication: the doctor's decision. */
+  order?: { medId: MedId; approved: boolean };
+  source: 'local' | 'remote';
+}
+
+/** Free-text chat with the on-call doctor (orders, advice, medication requests). */
+export interface DoctorChatService {
+  ask(ctx: DoctorChatContext, question: string, history?: readonly ChatTurn[]): Promise<DoctorChatReply>;
 }

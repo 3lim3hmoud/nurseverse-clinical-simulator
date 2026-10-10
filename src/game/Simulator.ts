@@ -85,6 +85,14 @@ export class Simulator {
       { id: 'iv-stand', labelKey: 'obj.iv' },
       (on) => this.world.iv.setHighlight(on),
     );
+    this.interaction.register(
+      this.world.medCart.group,
+      { id: 'med-cart', labelKey: 'obj.medcart' },
+      (on) => this.world.medCart.setHighlight(on),
+    );
+    for (const root of this.world.curtains.pickRoots) {
+      this.interaction.register(root, { id: 'curtain', labelKey: 'obj.curtain' }, (on) => this.world.curtains.setHighlight(on));
+    }
     this.interaction.register(this.world.patient.group, { id: 'patient', labelKey: 'obj.patient' });
     this.interaction.register(this.world.bed.group, { id: 'patient', labelKey: 'obj.patient' });
 
@@ -149,6 +157,12 @@ export class Simulator {
     this.audio.setMuted(muted);
   }
 
+  /** Opens the privacy curtains if closed, closes them if open. Returns true when they are now closed. */
+  toggleCurtains(): boolean {
+    this.world.curtains.setClosed(!this.world.curtains.closed);
+    return this.world.curtains.closed;
+  }
+
   /** BP cuff inflates and deflates on the patient's arm. */
   pulseCuff(seconds: number): void {
     this.world.patient.pulseCuff(seconds);
@@ -203,6 +217,7 @@ export class Simulator {
     }
     this.world.patient.update(simDt, vitals.respiratoryRate);
     this.world.iv.update(simDt);
+    this.world.curtains.update(dt, this.camera.position.x, this.camera.position.z);
     this.world.monitor.display.update(vitals, time, simDt);
     this.renderer.render(this.world.scene, this.camera);
   };

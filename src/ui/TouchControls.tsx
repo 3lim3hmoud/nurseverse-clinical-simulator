@@ -11,6 +11,7 @@ interface Props {
   onLook: (dx: number, dy: number) => void;
   onInteract: () => void;
   onPause: () => void;
+  onChat: () => void;
   muted: boolean;
   onToggleMute: () => void;
 }
@@ -85,7 +86,7 @@ function LookZone({ onLook }: { onLook: (dx: number, dy: number) => void }) {
   );
 }
 
-export default function TouchControls({ canInteract, onMove, onLook, onInteract, onPause, muted, onToggleMute }: Props) {
+export default function TouchControls({ canInteract, onMove, onLook, onInteract, onPause, onChat, muted, onToggleMute }: Props) {
   const { t } = useI18n();
   return (
     <div className="touch">
@@ -105,6 +106,9 @@ export default function TouchControls({ canInteract, onMove, onLook, onInteract,
       <div className="touch__top">
         <button type="button" onClick={onPause}>
           {t('touch.pause')}
+        </button>
+        <button type="button" onClick={onChat}>
+          💬 {t('hud.chat')}
         </button>
         <button type="button" onClick={onToggleMute}>
           {t(muted ? 'touch.soundOff' : 'touch.soundOn')}
