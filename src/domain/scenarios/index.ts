@@ -1,20 +1,24 @@
 import { t } from '../../i18n';
 import type { Interventions } from '../physiology/interventions';
+import { HypoglycemiaEngine } from '../physiology/HypoglycemiaEngine';
 import { HypovolemiaEngine } from '../physiology/HypovolemiaEngine';
 import { HypoxiaEngine } from '../physiology/HypoxiaEngine';
 import type { PhysiologyEngine } from '../physiology';
 import type { PatientProfile, Vitals } from '../patient/types';
 import { RespiratoryScorer } from '../scoring/RespiratoryScorer';
+import { HypoglycemiaScorer } from '../scoring/HypoglycemiaScorer';
 import { ShockScorer } from '../scoring/ShockScorer';
 import type { PerformanceScorer } from '../scoring';
-import { respiratoryFindings, shockFindings, type Findings } from './findings';
+import { hypoglycemiaFindings, respiratoryFindings, shockFindings, type Findings, type SimExtras } from './findings';
 
-export type ScenarioId = 'respiratory' | 'shock';
+export type ScenarioId = 'respiratory' | 'shock' | 'hypoglycemia';
+export type Severity3 = 'severe' | 'moderate' | 'mild';
 
 export interface DoctorContext {
   stabilised: boolean;
   oxygenOn: boolean;
   ivOn: boolean;
+  glucoseTreated?: boolean;
 }
 
 export interface Scenario {
@@ -29,8 +33,17 @@ export interface Scenario {
   patient: PatientProfile;
   initialVitals: Vitals;
   createEngine(): PhysiologyEngine;
-  isStable(v: Vitals, iv: Interventions): boolean;
-  isFailed(v: Vitals): boolean;
+  isStable(v: Vitals, iv: Interventions, x: SimExtras): boolean;
+  isFailed(v: Vitals, x: SimExtras): boolean;
+  /** How unwell the patient looks right now (drives the interview answers). */
+  severity(v: Vitals, x: SimExtras): Severity3;
+  /** Extra bedside tools this case offers. */
+  tools?: { glucometer?: boolean };
+  /** Topics a good history should cover in this case (used in the debrief). */
+  keyHistory: string[];
+  /** Recommendation options for the SBAR report: the specific, best one first. */
+  sbarBestKey: string;
+  debriefTipKey: string;
   findings: Findings;
   doctorReply(ctx: DoctorContext): string;
   scorer: PerformanceScorer;
@@ -60,6 +73,10 @@ export const respiratoryScenario: Scenario = {
   },
   isStable: (v, iv) => v.spo2 >= 94 && iv.oxygen !== null,
   isFailed: (v) => v.spo2 < 78,
+  severity: (v) => (v.spo2 < 88 ? 'severe' : v.spo2 < 94 ? 'moderate' : 'mild'),
+  keyHistory: ['onset', 'allergies', 'meds', 'pmh'],
+  sbarBestKey: 'sbar.rec.resp',
+  debriefTipKey: 'tip.respiratory',
   findings: respiratoryFindings,
   doctorReply: (c) => t(c.stabilised ? 'doc.thanks' : c.oxygenOn ? 'doc.keepO2' : 'doc.startO2'),
   scorer: new RespiratoryScorer(),
@@ -88,11 +105,52 @@ export const shockScenario: Scenario = {
   },
   isStable: (v) => v.systolic >= 100 && v.heartRate <= 110,
   isFailed: (v) => v.systolic < 72,
+  severity: (v) => (v.systolic < 85 ? 'severe' : v.systolic < 100 ? 'moderate' : 'mild'),
+  keyHistory: ['onset', 'allergies', 'meds', 'gi'],
+  sbarBestKey: 'sbar.rec.shock',
+  debriefTipKey: 'tip.shock',
   findings: shockFindings,
   doctorReply: (c) => t(c.stabilised ? 'doc.thanks' : c.ivOn ? 'doc.keepFluids' : 'doc.startFluids'),
   scorer: new ShockScorer(),
 };
 
-export const SCENARIOS: Record<ScenarioId, Scenario> = { respiratory: respiratoryScenario, shock: shockScenario };
+export const hypoglycemiaScenario: Scenario = {
+  id: 'hypoglycemia',
+  titleKey: 'scen.hypoglycemia.title',
+  blurbKey: 'scen.hypoglycemia.blurb',
+  introKey: 'scen.hypoglycemia.intro',
+  objectiveKey: 'obj.assess',
+  stableObjectiveKey: 'obj.stable',
+  timeLimitSec: 420,
+  stableSeconds: 20,
+  patient: {
+    id: 'pt-003',
+    ageYears: 67,
+    sex: 'male',
+    bedLabel: 'Bay 2',
+    boardLines: ['Male, 67 years', 'Diabetic, sweaty and confused', 'Allergies: none known', 'Doctor on call: ext. 214'],
+    appearance: { hair: 'short', hairColor: 0xb5b5b5, beard: false, skin: 0xd2a07a, gown: 0xb7d7a8, alertness: 0.6 },
+  },
+  initialVitals: { heartRate: 112, spo2: 98, respiratoryRate: 19, systolic: 134, diastolic: 80, temperatureC: 36.5 },
+  createEngine() {
+    return new HypoglycemiaEngine(this.initialVitals, 38);
+  },
+  isStable: (v, _iv, x) => (x.glucose ?? 0) >= 70 && v.heartRate <= 105,
+  isFailed: (_v, x) => (x.glucose ?? 100) < 22,
+  severity: (_v, x) => ((x.glucose ?? 100) < 45 ? 'severe' : (x.glucose ?? 100) < 70 ? 'moderate' : 'mild'),
+  tools: { glucometer: true },
+  keyHistory: ['onset', 'meds', 'lastmeal', 'diabetes'],
+  sbarBestKey: 'sbar.rec.hypo',
+  debriefTipKey: 'tip.hypoglycemia',
+  findings: hypoglycemiaFindings,
+  doctorReply: (c) => t(c.stabilised ? 'doc.thanks' : c.glucoseTreated ? 'doc.hypoTreated' : 'doc.hypoCheck'),
+  scorer: new HypoglycemiaScorer(),
+};
+
+export const SCENARIOS: Record<ScenarioId, Scenario> = {
+  respiratory: respiratoryScenario,
+  shock: shockScenario,
+  hypoglycemia: hypoglycemiaScenario,
+};
 
 export { ScenarioSession, type EndReason } from './session';

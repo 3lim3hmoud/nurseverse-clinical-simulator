@@ -19,6 +19,18 @@ Pick a case from the menu (English or Arabic, switch any time):
 
 - **Short of breath**: 58-year-old man, falling SpO₂. Oxygen device + flow, sitting upright.
 - **Low blood pressure**: 34-year-old woman with dehydration. IV fluid type + rate, raising the legs.
+- **Low blood sugar**: 67-year-old diabetic man, sweaty and confused. Glucometer first, then oral glucose, IV dextrose or glucagon, then recheck.
+
+## Talk to the patient, SBAR report and debrief
+
+- **Talk to the patient** (patient panel): type any question in English or Arabic, or tap a ready-made one. The patient answers from the case history, and the answer follows how sick they are right now. It works fully offline (`services/ai/LocalPatientConversation.ts`). The sim clock is paused while you type.
+- **SBAR report**: "Notify the doctor" opens a handover. Background only shows what you actually asked, and you choose the recommendation.
+- **Debrief** on the results screen: what went well, what to work on, and what to do next time, built from the score and your event log.
+- Scoring totals are unchanged. History taking and SBAR quality appear in the debrief, not in the score.
+
+### Optional: let an LLM write the answers
+
+Set `VITE_AI_ENDPOINT` when building to point at **your own server** (a small proxy that calls the model). Never put a model API key in this app: it would be public. The request/response contract is documented in `services/ai/RemoteServices.ts`. If the endpoint is empty, slow or fails, the offline patient answers, so the simulator always works. Intents are always detected locally, so the debrief works the same either way.
 
 ## Oxygen case details (Emergency Bay 3)
 
@@ -73,4 +85,5 @@ pixel ratio capped at 1.5, monitor screen drawn on one small canvas texture.
 - Physiology: implement `PhysiologyEngine` and call it from `PatientModel.tick`.
 - Decision engine / scoring: consume `EventLog` events and `Scenario` data.
 - New equipment: add a builder in `game/world/`, place it in `ClinicalScene.ts`, register it with `InteractionSystem.register`.
-- AI conversation / debriefing: implement the interfaces in `services/ai`.
+- AI conversation / debriefing: implement `PatientConversationService` / `DebriefingService` in `services/ai`.
+- New case: add an engine, a scorer, findings and a scenario in `domain/scenarios`, plus `hx.<id>.*` interview answers and `sbar.*` strings in `i18n/extra-*.ts`.

@@ -11,6 +11,8 @@ export const ASSESSMENT_EVENTS = [
   'heart-auscultated',
   'temp-measured',
   'patient-asked',
+  'history-asked',
+  'glucose-checked',
 ];
 
 export class Events {

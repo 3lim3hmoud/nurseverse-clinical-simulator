@@ -1,5 +1,6 @@
 import { BAG_ML, FLUID_TIME_SCALE } from '../physiology/fluids';
 import type { Interventions, IvInfusion } from '../physiology/interventions';
+import type { GlucoseTreatment } from '../physiology/glucose';
 import type { OxygenSetup } from '../physiology/oxygen';
 import type { PhysiologyEngine } from '../physiology';
 import type { PatientProfile, Vitals } from './types';
@@ -73,6 +74,16 @@ export class PatientModel {
 
   stopIv(): void {
     this.interventions = { ...this.interventions, iv: null };
+  }
+
+  /** Blood glucose in mg/dL, or undefined for cases that do not model it. Needs a glucometer in the simulation. */
+  getGlucose(): number | undefined {
+    const g = this.engine.getGlucose?.();
+    return g === undefined ? undefined : Math.round(g);
+  }
+
+  giveGlucoseTreatment(kind: GlucoseTreatment): void {
+    this.engine.applyTreatment?.(kind);
   }
 
   hangNewBag(): void {

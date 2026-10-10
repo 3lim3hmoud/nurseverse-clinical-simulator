@@ -1,3 +1,4 @@
+import { extraAr } from './extra-ar';
 /** Arabic strings (same keys as en.ts). */
 export const ar: Record<string, string> = {
   'app.title': 'NurseVerse – المحاكي السريري',
@@ -263,4 +264,6 @@ export const ar: Record<string, string> = {
   'tl.doctor': 'أبلغت الطبيب (SpO₂ {spo2}%، الضغط {sys}/{dia})',
   'tl.stable': 'استقرت حالة المريض',
   'tl.end': 'انتهت الحالة',
+
+  ...extraAr,
 };

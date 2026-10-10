@@ -1,6 +1,7 @@
 import type { SimEvent } from '../../core/EventLog';
 import { t } from '../../i18n';
 import { FLUIDS, type FluidType } from '../physiology/fluids';
+import { GLUCOSE_TREATMENTS, type GlucoseTreatment } from '../physiology/glucose';
 import { OXYGEN_DEVICES, type OxygenDevice } from '../physiology/oxygen';
 
 export interface TimelineRow {
@@ -38,6 +39,10 @@ export function buildTimeline(events: readonly SimEvent[]): TimelineRow[] {
       case 'temp-measured': text = t('tl.temp'); break;
       case 'bp-measured': text = t('tl.bp', { sys: d.sys, dia: d.dia }); break;
       case 'iv-checked': text = t('tl.ivSite'); break;
+      case 'history-asked': text = t('tl.history', { topics: ((e.data?.intents as string[] | undefined) ?? []).filter((i) => !['thanks', 'greeting', 'name'].includes(i)).map((i) => t(`intent.${i}`)).join(', ') }); break;
+      case 'glucose-checked': text = t('tl.glucose', { g: d.glucose }); break;
+      case 'glucose-given': text = t('tl.glucoseGiven', { treatment: t(GLUCOSE_TREATMENTS[d.kind as GlucoseTreatment].labelKey) }); break;
+      case 'sbar-sent': text = t('tl.sbar'); break;
       case 'alarm-silenced': text = t('tl.alarm'); break;
       case 'doctor-notified': text = t('tl.doctor', { spo2: d.spo2, sys: d.sys, dia: d.dia }); break;
       case 'patient-stabilised': text = t('tl.stable'); break;
