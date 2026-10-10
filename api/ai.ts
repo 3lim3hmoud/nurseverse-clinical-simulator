@@ -1,9 +1,11 @@
 /**
  * AI backend for the simulator (Vercel serverless function, no dependencies).
- * The Anthropic API key lives ONLY here, as the ANTHROPIC_API_KEY environment variable. Never ship it in the browser app.
+ * The model API key lives ONLY here, as an environment variable. Never ship it in the browser app.
  *
- * Env: ANTHROPIC_API_KEY (required) · AI_MODEL_PATIENT (default claude-haiku-5-5, fast chat)
- *      AI_MODEL_DEBRIEF (default claude-sonnet-5-5) · ALLOWED_ORIGINS (comma list; needed when the app is on another domain)
+ * Provider (first key found wins):
+ *   GEMINI_API_KEY     Google Gemini. Has a free tier (key from aistudio.google.com/apikey, no billing needed).
+ *   ANTHROPIC_API_KEY  Claude. Paid.
+ * Optional: AI_MODEL_PATIENT, AI_MODEL_DEBRIEF (defaults below) · ALLOWED_ORIGINS (comma list; needed when the app is on another domain)
  *
  * POST /api/ai  { kind: "patient" | "doctor" | "debrief", ... }  -> { text } | { strengths, improvements, nextStep }
  */
@@ -21,8 +23,16 @@ interface Res {
 }
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL_PATIENT = process.env.AI_MODEL_PATIENT || 'claude-haiku-5-5';
-const MODEL_DEBRIEF = process.env.AI_MODEL_DEBRIEF || 'claude-sonnet-5-5';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const provider = (): 'gemini' | 'anthropic' | null => (process.env.GEMINI_API_KEY ? 'gemini' : process.env.ANTHROPIC_API_KEY ? 'anthropic' : null);
+const DEFAULT_MODELS = {
+  gemini: { patient: 'gemini-2.5-flash-lite', debrief: 'gemini-2.5-flash-lite' },
+  anthropic: { patient: 'claude-haiku-5-5', debrief: 'claude-sonnet-5-5' },
+};
+const modelFor = (job: 'patient' | 'debrief'): string => {
+  const p = provider() ?? 'gemini';
+  return (job === 'patient' ? process.env.AI_MODEL_PATIENT : process.env.AI_MODEL_DEBRIEF) || DEFAULT_MODELS[p][job];
+};
 const SCENARIOS = ['respiratory', 'shock', 'hypoglycemia'];
 const MAX_BODY_CHARS = 30_000;
 
@@ -69,21 +79,43 @@ function toMessages(history: Turn[], question: string) {
   return out;
 }
 
-async function claude(model: string, system: string, messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new HttpError(500, 'AI is not configured on the server');
+/** One text-generation call, on whichever provider is configured. Returns the model's text. */
+async function generate(job: 'patient' | 'debrief', system: string, messages: { role: 'user' | 'assistant'; content: string }[], maxTokens: number): Promise<string> {
+  const which = provider();
+  if (!which) throw new HttpError(500, 'AI is not configured on the server');
+  const model = modelFor(job);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25_000);
   try {
-    const res = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new HttpError(502, `model error ${res.status}`);
-    const data = (await res.json()) as { content?: { type: string; text?: string }[] };
-    const text = (data.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+    let res: Response;
+    if (which === 'gemini') {
+      res = await fetch(`${GEMINI_URL}/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY as string },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+          generationConfig: { maxOutputTokens: maxTokens, temperature: job === 'patient' ? 0.7 : 0.4 },
+        }),
+        signal: ctrl.signal,
+      });
+    } else {
+      res = await fetch(ANTHROPIC_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY as string, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
+        signal: ctrl.signal,
+      });
+    }
+    if (!res.ok) throw new HttpError(res.status === 429 ? 429 : 502, `model error ${res.status}`);
+    const data = (await res.json()) as {
+      content?: { type: string; text?: string }[];
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text =
+      which === 'gemini'
+        ? (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+        : (data.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
     if (!text) throw new HttpError(502, 'empty model answer');
     return text;
   } finally {
@@ -117,7 +149,7 @@ async function patient(b: Record<string, unknown>) {
     `FACTS:\n${facts.map((f) => `- ${f}`).join('\n')}`,
     `CURRENT STATE: ${str(b.state, 400)}`,
   ].join('\n');
-  const text = await claude(MODEL_PATIENT, system, toMessages(turns(b.history), question), 220);
+  const text = await generate('patient', system, toMessages(turns(b.history), question), 400);
   return { text };
 }
 
@@ -139,7 +171,7 @@ async function doctor(b: Record<string, unknown>) {
     `A: ${str(r.assessment, 600)}`,
     `R: ${str(r.recommendation, 400)}`,
   ].join('\n');
-  const text = await claude(MODEL_PATIENT, system, [{ role: 'user', content }], 220);
+  const text = await generate('patient', system, [{ role: 'user', content }], 400);
   return { text };
 }
 
@@ -164,7 +196,7 @@ async function debrief(b: Record<string, unknown>) {
     'At most 4 strengths and 4 improvements, each under 220 characters. nextStep is one actionable sentence.',
   ].join('\n');
   const content = JSON.stringify({ scenario: str(b.scenarioId, 20), score: Number(b.score) || 0, items, events, progress });
-  const raw = await claude(MODEL_DEBRIEF, system, [{ role: 'user', content }], 700);
+  const raw = await generate('debrief', system, [{ role: 'user', content }], 1500);
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new HttpError(502, 'bad debrief format');
   const parsed = JSON.parse(m[0]) as { strengths?: unknown; improvements?: unknown; nextStep?: unknown };
