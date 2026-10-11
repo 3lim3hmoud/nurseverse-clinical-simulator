@@ -421,3 +421,7 @@ body {
   .tabs { padding: 4px 12px 0; }
   .tab { padding: 8px 14px; }
 }
+
+.chat__mic { padding: 8px 12px; min-width: 44px; }
+.chat__mic--on { background: #fdecea; border-color: #e0584a; color: #c0392b; animation: micpulse 1s infinite; }
+@keyframes micpulse { 50% { opacity: 0.55; } }

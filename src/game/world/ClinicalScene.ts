@@ -9,6 +9,7 @@ import { createIVStand, type IvRig } from './IVStand';
 import { createMedicationCart, type MedCartRig } from './MedicationCart';
 import { createOxygenDevice, type OxygenRig } from './OxygenDevice';
 import { createPatient, type PatientRig } from './Patient';
+import { makeHighlightable } from './models';
 import { createPatientMonitor, type PatientMonitor } from './PatientMonitor';
 import { createPrivacyCurtains, type CurtainRig } from './PrivacyCurtains';
 
@@ -23,6 +24,7 @@ export interface ClinicalScene {
   iv: IvRig;
   curtains: CurtainRig;
   medCart: MedCartRig;
+  sanitizer: { root: THREE.Object3D; setHighlight(on: boolean): void } | null;
   setLegAngle(angle: number): void;
   setHeadAngle(angle: number): void;
   setOxygenVisual(setup: OxygenSetup | null): void;
@@ -36,7 +38,7 @@ const sagged = (a: THREE.Vector3, b: THREE.Vector3, sag: number) => {
 };
 
 /** Assembles the whole room. Add new equipment here. */
-export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
+export function buildClinicalScene(profile: PatientProfile, options: { glucometer?: boolean } = {}): ClinicalScene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xdfe8ea);
 
@@ -46,7 +48,7 @@ export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
   sun.position.set(1.5, 6, 2.5);
   scene.add(sun);
 
-  const room = buildEmergencyRoom(profile);
+  const room = buildEmergencyRoom(profile, options);
   scene.add(room.group);
   const colliders = [...room.colliders];
 
@@ -140,6 +142,7 @@ export function buildClinicalScene(profile: PatientProfile): ClinicalScene {
     iv,
     curtains,
     medCart,
+    sanitizer: room.sanitizer ? { root: room.sanitizer, setHighlight: makeHighlightable(room.sanitizer) } : null,
     setLegAngle(angle) {
       bed.setLegAngle(angle);
       patient.setLegAngle(angle);

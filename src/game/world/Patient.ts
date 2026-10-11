@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PatientAppearance, Vitals } from '../../domain/patient/types';
 import type { OxygenDevice } from '../../domain/physiology/oxygen';
 import { box, canvasTexture, cyl, lambert, sphere } from './helpers';
+import { createPatientFromModel } from './PatientGlb';
 
 const HIP_Y = 0.77; // pivot height: mattress surface
 const css = (hex: number) => `#${hex.toString(16).padStart(6, '0')}`;
@@ -47,8 +48,12 @@ function faceY(x: number, z: number): number {
   return Math.max(ell(0.98, -0.8, 0.0966, 0.105, 0.1155), ell(0.945, -0.72, 0.075, 0.06, 0.075));
 }
 
-/** Low-poly adult patient lying on their back (head at -z). Upper body and legs pivot at the hip. */
+/** Patient lying on their back (head at -z). Upper body and legs pivot at the hip. */
 export function createPatient(look: PatientAppearance): PatientRig {
+  return createPatientFromModel(look) ?? createProceduralPatient(look);
+}
+
+function createProceduralPatient(look: PatientAppearance): PatientRig {
   const group = new THREE.Group();
 
   const baseSkin = new THREE.Color(look.skin);

@@ -49,6 +49,7 @@ export default function App() {
 function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRestart: () => void; onMenu: () => void }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const simRef = useRef<Simulator | null>(null);
+  const hygieneWarned = useRef(false);
   const toastTimer = useRef<number>(0);
 
   const touch = useMemo(isTouchDevice, []);
@@ -112,6 +113,11 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
           }
         },
         onInteract: (tgt) => {
+          if (tgt?.id === 'sanitizer') {
+            log.record('hand-hygiene');
+            showToast(t('toast.hygiene'));
+            return;
+          }
           if (tgt?.id === 'curtain') {
             const closed = sim.toggleCurtains();
             log.record(closed ? 'curtain-closed' : 'curtain-opened');
@@ -123,7 +129,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
         },
         onTick: (dt) => session.update(dt),
         onAlarmChange: setAlarm,
-      });
+      }, { glucometer: scenario.tools?.glucometer === true });
     } catch (e) {
       console.error(e);
       setError('error.webgl');
@@ -140,6 +146,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
     };
     patient.onBagEmpty = () => showToast(t('toast.bagEmpty'));
 
+    if (import.meta.env.DEV) (window as unknown as { __sim?: Simulator }).__sim = sim; // dev-only: lets tests drive the camera
     simRef.current = sim;
     sim.start();
     return () => {
@@ -234,36 +241,51 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
     showToast(t('toast.alarm'));
   };
 
+  /** Touching the patient without having cleaned the hands first: one gentle reminder, and it is noted in the debrief. */
+  const hygieneCheck = () => {
+    if (hygieneWarned.current || log.all().some((e) => e.type === 'hand-hygiene')) return;
+    hygieneWarned.current = true;
+    log.record('hygiene-missed');
+    showToast(t('toast.hygieneMissed'));
+  };
+
   const actions: PatientActions = {
     ask() {
+      hygieneCheck();
       log.record('patient-asked');
       return scenario.findings.ask(patient.getVitals(), { glucose: patient.getGlucose() });
     },
     skin() {
+      hygieneCheck();
       log.record('skin-checked');
       return scenario.findings.skin(patient.getVitals(), { glucose: patient.getGlucose() });
     },
     heart() {
+      hygieneCheck();
       log.record('heart-auscultated');
       simRef.current?.listenHeart();
       return scenario.findings.heart(patient.getVitals());
     },
     lungs() {
+      hygieneCheck();
       const f = scenario.findings.lungs(patient.getVitals());
       log.record('lungs-auscultated');
       simRef.current?.listenLungs(f.crackles);
       return f.text;
     },
     temp() {
+      hygieneCheck();
       log.record('temp-measured');
       return t('msg.temp', { temp: patient.getVitals().temperatureC.toFixed(1) });
     },
     bp() {
+      hygieneCheck();
       simRef.current?.pulseCuff(6);
       log.record('bp-measured', { sys: sys(), dia: dia() });
       return t('msg.bp', { sys: sys(), dia: dia() });
     },
     ivSite() {
+      hygieneCheck();
       log.record('iv-checked');
       return t('msg.ivSite');
     },
@@ -296,6 +318,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
       return t(`msg.glucose.${kind}`, { treatment: t(GLUCOSE_TREATMENTS[kind].labelKey) });
     },
     async askPatient(question: string, history: readonly ChatTurn[]) {
+      hygieneCheck();
       const reply = await patientConversation.ask(
         { scenario, vitals: patient.getVitals(), glucose: patient.getGlucose(), lang: getLang() },
         question,

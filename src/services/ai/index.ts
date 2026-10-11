@@ -1,7 +1,7 @@
 import { LocalDebriefing } from './LocalDebriefing';
 import { LocalDoctorConversation } from './LocalDoctorConversation';
 import { LocalPatientConversation } from './LocalPatientConversation';
-import { RemoteDebriefing, RemoteDoctor, RemotePatientConversation } from './RemoteServices';
+import { RemoteDebriefing, RemoteDoctor, RemoteDoctorChat, RemotePatientConversation } from './RemoteServices';
 import type { DebriefingService, DoctorChatService, DoctorService, PatientConversationService } from './types';
 
 export type { DoctorChatContext, DoctorChatReply, DoctorChatService, DoctorContext, DoctorService, ChatTurn, Debrief, DebriefInput, DebriefingService, PatientContext, PatientConversationService, PatientReply } from './types';
@@ -22,5 +22,6 @@ export const patientConversation: PatientConversationService = ENDPOINT ? new Re
 export const debriefing: DebriefingService = ENDPOINT ? new RemoteDebriefing(ENDPOINT, localDebrief) : localDebrief;
 export const doctorService: DoctorService = ENDPOINT ? new RemoteDoctor(ENDPOINT) : { reply: async () => null };
 
-/** Free-text chat with the on-call doctor. Always offline: orders and medication safety must stay deterministic. */
-export const doctorChat: DoctorChatService = new LocalDoctorConversation();
+/** Free-text chat with the on-call doctor. Orders are always decided offline; the AI backend (if any) only words the reply. */
+const localDoctorChat = new LocalDoctorConversation();
+export const doctorChat: DoctorChatService = ENDPOINT ? new RemoteDoctorChat(ENDPOINT, localDoctorChat) : localDoctorChat;

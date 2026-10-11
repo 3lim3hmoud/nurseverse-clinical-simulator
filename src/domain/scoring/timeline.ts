@@ -44,6 +44,8 @@ export function buildTimeline(events: readonly SimEvent[]): TimelineRow[] {
       case 'glucose-checked': text = t('tl.glucose', { g: d.glucose }); break;
       case 'glucose-given': text = t('tl.glucoseGiven', { treatment: t(GLUCOSE_TREATMENTS[d.kind as GlucoseTreatment].labelKey) }); break;
       case 'sbar-sent': text = t('tl.sbar'); break;
+      case 'hand-hygiene': text = t('tl.hygiene'); break;
+      case 'hygiene-missed': text = t('tl.hygieneMissed'); break;
       case 'curtain-closed': text = t('tl.curtainClosed'); break;
       case 'curtain-opened': text = t('tl.curtainOpened'); break;
       case 'doctor-chat': text = t('tl.doctorChat'); break;

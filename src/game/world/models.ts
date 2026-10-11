@@ -14,6 +14,8 @@ interface Spec {
   file: string;
   /** Node names that stay separate meshes (animated, highlighted or looked up by a rig). */
   keep?: string[];
+  /** Skip merging: the rig partitions the meshes itself (e.g. the patient's body parts). */
+  unmerged?: boolean;
 }
 
 const SPECS = {
@@ -31,6 +33,13 @@ const SPECS = {
   drinkingCup: { file: 'Drinking_Cup.glb' },
   pillBottle: { file: 'Pill_Bottle.glb' },
   syringe: { file: 'Syringe.glb' },
+  glucometer: { file: 'Glucometer.glb' },
+  bed: {
+    file: 'Hospital_Bed.glb',
+    // These bend at the hip, so they stay separate meshes for the bed rig to skin
+    keep: ['Mattress', 'Deck', 'FittedSheet', 'PipingSide', 'PipingSide.001', 'PipingEnd', 'PipingEnd.001', 'SectionSeam', 'SectionSeam.001', 'Pillow', 'PillowSeam'],
+  },
+  patient: { file: 'Patient.glb', unmerged: true },
   patientMonitor: { file: 'Patient_Monitor.glb', keep: ['Screen', 'Bezel', 'AlarmLight', 'AlarmLight.001', 'Port.001'] },
   ivStand: { file: 'IV_Stand_Pump.glb', keep: ['Pump', 'PumpScreen', 'PumpLED', 'IVBag0', 'DripChamber', 'IVPort0'] },
   oxygenCylinder: { file: 'Oxygen_Cylinder.glb', keep: ['Body.005', 'GaugeNeedle'] },
@@ -40,7 +49,7 @@ const SPECS = {
 export type ModelName = keyof typeof SPECS;
 
 /** GLTFLoader strips characters like "." from node names ("AlarmLight.001" -> "AlarmLight001"); use Blender's names everywhere else. */
-const clean = (name: string) => THREE.PropertyBinding.sanitizeNodeName(name);
+export const cleanName = (name: string) => THREE.PropertyBinding.sanitizeNodeName(name);
 
 const templates = new Map<ModelName, THREE.Group>();
 let preloading: Promise<void> | null = null;
@@ -76,7 +85,7 @@ function toLambert(src: THREE.Material, cache: Map<THREE.Material, THREE.Materia
 }
 
 /** Merge all meshes that share a material into one (hundreds of tiny meshes -> a handful of draw calls). */
-function mergeStatic(root: THREE.Group, keep: Set<string>): void {
+export function mergeStaticMeshes(root: THREE.Group, keep: Set<string>): void {
   root.updateMatrixWorld(true);
   const inverseRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -137,7 +146,7 @@ async function loadOne(name: ModelName, loader: GLTFLoader): Promise<void> {
     mesh.geometry.userData.shared = true;
     mesh.matrixAutoUpdate = true;
   });
-  mergeStatic(root, new Set((spec.keep ?? []).map(clean)));
+  if (!spec.unmerged) mergeStaticMeshes(root, new Set((spec.keep ?? []).map(cleanName)));
   templates.set(name, root);
 }
 
@@ -156,7 +165,7 @@ export function preloadModels(): Promise<void> {
 export const hasModel = (name: ModelName): boolean => templates.has(name);
 
 /** Find a kept mesh by its Blender name. */
-export const findMesh = (root: THREE.Object3D, name: string): THREE.Mesh | undefined => root.getObjectByName(clean(name)) as THREE.Mesh | undefined;
+export const findMesh = (root: THREE.Object3D, name: string): THREE.Mesh | undefined => root.getObjectByName(cleanName(name)) as THREE.Mesh | undefined;
 
 /** A fresh copy (geometry and materials are shared; clone a material before changing it). */
 export function cloneModel(name: ModelName): THREE.Group | null {
@@ -166,7 +175,7 @@ export function cloneModel(name: ModelName): THREE.Group | null {
 
 /** Give one named mesh its own material so it can glow / change colour without affecting other copies. */
 export function ownMaterial<T extends THREE.Material = THREE.MeshLambertMaterial>(root: THREE.Object3D, meshName: string): T | null {
-  const mesh = root.getObjectByName(clean(meshName)) as THREE.Mesh | undefined;
+  const mesh = root.getObjectByName(cleanName(meshName)) as THREE.Mesh | undefined;
   if (!mesh || !mesh.isMesh) return null;
   const mat = (mesh.material as THREE.Material).clone() as T;
   mat.userData.shared = false;
@@ -190,7 +199,7 @@ export function makeHighlightable(root: THREE.Object3D): (on: boolean) => void {
 
 /** Local-space (relative to `root`) bounding box of a named mesh. */
 export function localBox(root: THREE.Object3D, meshName: string): THREE.Box3 | null {
-  const mesh = root.getObjectByName(clean(meshName)) as THREE.Mesh | undefined;
+  const mesh = root.getObjectByName(cleanName(meshName)) as THREE.Mesh | undefined;
   if (!mesh) return null;
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(mesh);
