@@ -76,6 +76,7 @@ export function blobShadow(w: number, d: number, x: number, z: number): THREE.Me
 export function disposeScene(root: THREE.Object3D): void {
   const shared = new Set<THREE.Material>(cache.values());
   root.traverse((o) => {
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) (o as THREE.SkinnedMesh).skeleton.dispose();
     const mesh = o as THREE.Mesh;
     // Models from models.ts are loaded once and reused by the next scene: never dispose their shared parts
     if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();

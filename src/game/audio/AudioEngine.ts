@@ -103,6 +103,56 @@ export class AudioEngine {
     breath.stop(t0 + seconds + 0.2);
   }
 
+  /** The patient coughs: a short run of band-passed noise bursts. */
+  cough(gain: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const noise = this.noiseBuffer(ctx);
+    const t0 = ctx.currentTime + 0.02;
+    const bursts = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < bursts; i++) {
+      const at = t0 + i * (0.16 + Math.random() * 0.06);
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 700 + Math.random() * 300;
+      bp.Q.value = 0.9;
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, at);
+      env.gain.linearRampToValueAtTime(0.55 * gain, at + 0.012);
+      env.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+      src.connect(bp);
+      bp.connect(env);
+      env.connect(this.master);
+      src.start(at, Math.random());
+      src.stop(at + 0.15);
+    }
+  }
+
+  /** A low, weak moan from an unwell patient. */
+  moan(gain: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const at = ctx.currentTime + 0.02;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150, at);
+    osc.frequency.linearRampToValueAtTime(110, at + 0.9);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 520;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.linearRampToValueAtTime(0.16 * gain, at + 0.3);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + 1.0);
+    osc.connect(lp);
+    lp.connect(env);
+    env.connect(this.master);
+    osc.start(at);
+    osc.stop(at + 1.05);
+  }
+
   dispose(): void {
     void this.ctx?.close();
     this.ctx = null;

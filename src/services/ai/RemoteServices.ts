@@ -1,6 +1,8 @@
+import { medById } from '../../domain/medications';
+import { t } from '../../i18n';
 import { detectIntents } from './intents';
 import { buildFacts } from './LocalPatientConversation';
-import type { ChatTurn, Debrief, DebriefInput, DebriefingService, DoctorContext, DoctorService, PatientContext, PatientConversationService, PatientReply } from './types';
+import type { ChatTurn, Debrief, DebriefInput, DebriefingService, DoctorChatContext, DoctorChatReply, DoctorChatService, DoctorContext, DoctorService, PatientContext, PatientConversationService, PatientReply } from './types';
 
 /**
  * Optional LLM backends. They talk to YOUR OWN endpoint (set VITE_AI_ENDPOINT at build time), never to a model
@@ -12,6 +14,8 @@ import type { ChatTurn, Debrief, DebriefInput, DebriefingService, DoctorContext,
  *             -> { "text": "<the patient's answer, in the requested language>" }
  *   doctor:   { kind: "doctor", lang, scenarioId, stabilised, report: { situation, background, assessment, recommendation } }
  *             -> { "text": "<the doctor's reply>" }
+ *   doctor-chat: { kind: "doctor-chat", lang, scenarioId, question, history, decision: { kind, medication?, approved?, draft } }
+ *             -> { "text": "<the doctor's message>" }   (the app decides orders; the model only words them)
  *   debrief:  { kind: "debrief", lang, scenarioId, score, items, events, progress }
  *             -> { "strengths": string[], "improvements": string[], "nextStep": string }
  */
@@ -100,6 +104,41 @@ export class RemoteDoctor implements DoctorService {
       return typeof data.text === 'string' && data.text.trim() ? data.text.trim() : null;
     } catch {
       return null;
+    }
+  }
+}
+
+/**
+ * Doctor chat with an AI voice. The offline doctor decides first (above all, whether a medication is approved) and the
+ * remote model only rewords that decision, so an order can never be invented or flipped by the model. Falls back to the offline text.
+ */
+export class RemoteDoctorChat implements DoctorChatService {
+  constructor(private endpoint: string, private fallback: DoctorChatService, private timeoutMs = 8000) {}
+
+  async ask(ctx: DoctorChatContext, question: string, history: readonly ChatTurn[] = []): Promise<DoctorChatReply> {
+    const local = await this.fallback.ask(ctx, question, history);
+    try {
+      const data = (await post(
+        this.endpoint,
+        {
+          kind: 'doctor-chat',
+          lang: ctx.lang,
+          scenarioId: ctx.scenario.id,
+          question,
+          history: history.slice(-8),
+          decision: {
+            kind: local.order ? 'order' : 'advice',
+            medication: local.order ? t(medById(local.order.medId).nameKey) : undefined,
+            approved: local.order?.approved,
+            draft: local.text,
+          },
+        },
+        this.timeoutMs,
+      )) as { text?: unknown };
+      if (typeof data.text !== 'string' || !data.text.trim()) throw new Error('empty answer');
+      return { ...local, text: data.text.trim(), source: 'remote' };
+    } catch {
+      return local;
     }
   }
 }

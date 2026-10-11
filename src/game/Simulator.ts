@@ -6,7 +6,7 @@ import type { Interventions } from '../domain/physiology/interventions';
 import { AudioEngine } from './audio/AudioEngine';
 import { FirstPersonController } from './controls/FirstPersonController';
 import { InteractionSystem, type InteractableInfo } from './interaction/InteractionSystem';
-import { INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS } from './layout';
+import { BED_POS, INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS } from './layout';
 import { buildClinicalScene, type ClinicalScene } from './world/ClinicalScene';
 import { disposeScene } from './world/helpers';
 
@@ -52,7 +52,7 @@ export class Simulator {
   private alarm: AlarmState = { active: false, silenced: false, codes: [], message: '' };
   private silencedUntil = 0;
 
-  constructor(private container: HTMLElement, private patient: PatientModel, private callbacks: SimulatorCallbacks) {
+  constructor(private container: HTMLElement, private patient: PatientModel, private callbacks: SimulatorCallbacks, options: { glucometer?: boolean } = {}) {
     const dpr = window.devicePixelRatio || 1;
     this.renderer = new THREE.WebGLRenderer({ antialias: dpr <= 1 });
     const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -60,7 +60,7 @@ export class Simulator {
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 30);
-    this.world = buildClinicalScene(patient.profile);
+    this.world = buildClinicalScene(patient.profile, options);
 
     this.controller = new FirstPersonController(this.camera, this.renderer.domElement, this.world.colliders, this.world.bounds, {
       onLockChange: (locked) => {
@@ -90,6 +90,8 @@ export class Simulator {
       { id: 'med-cart', labelKey: 'obj.medcart' },
       (on) => this.world.medCart.setHighlight(on),
     );
+    const sanitizer = this.world.sanitizer;
+    if (sanitizer) this.interaction.register(sanitizer.root, { id: 'sanitizer', labelKey: 'obj.sanitizer' }, (on) => sanitizer.setHighlight(on));
     for (const root of this.world.curtains.pickRoots) {
       this.interaction.register(root, { id: 'curtain', labelKey: 'obj.curtain' }, (on) => this.world.curtains.setHighlight(on));
     }
@@ -218,6 +220,7 @@ export class Simulator {
     this.world.patient.update(simDt, vitals.respiratoryRate);
     this.world.iv.update(simDt);
     this.world.curtains.update(dt, this.camera.position.x, this.camera.position.z);
+    this.patientSounds(vitals, simDt, time);
     this.world.monitor.display.update(vitals, time, simDt);
     this.renderer.render(this.world.scene, this.camera);
   };
@@ -267,6 +270,23 @@ export class Simulator {
     const ringing = this.alarm.active && !this.alarm.silenced;
     this.world.monitor.setAlarmLight(ringing && Math.floor(time * 2) % 2 === 0);
     if (ringing && this.running) this.audio.alarm(this.distanceGain(MONITOR_POS, 6));
+  }
+
+  private nextCoughAt = 6;
+  private nextMoanAt = 14;
+
+  /** An unwell patient coughs or moans now and then (quieter with distance, and silent while paused or muted). */
+  private patientSounds(vitals: ReturnType<PatientModel['getVitals']>, simDt: number, time: number): void {
+    if (simDt <= 0) return;
+    const gain = this.distanceGain(BED_POS, 7);
+    if (vitals.spo2 < 94 && time >= this.nextCoughAt) {
+      this.audio.cough(gain);
+      this.nextCoughAt = time + 5 + Math.random() * 9;
+    }
+    if (vitals.systolic < 100 && vitals.heartRate > 105 && time >= this.nextMoanAt) {
+      this.audio.moan(gain);
+      this.nextMoanAt = time + 12 + Math.random() * 14;
+    }
   }
 
   /** Quieter when the player is far from the source. */

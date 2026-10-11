@@ -17,13 +17,27 @@ interface Props {
   peer?: 'patient' | 'doctor';
 }
 
+interface Recognition {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+const SpeechRec: (new () => Recognition) | undefined =
+  typeof window === 'undefined' ? undefined : (window as unknown as Record<string, new () => Recognition>).SpeechRecognition ?? (window as unknown as Record<string, new () => Recognition>).webkitSpeechRecognition;
+
 export default function PatientChat({ turns, onTurns, ask, onTypingChange, peer = 'patient' }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const doctor = peer === 'doctor';
   const quick = doctor ? DOCTOR_QUICK : QUICK;
   const prefix = doctor ? 'dchat' : 'chat';
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<Recognition | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
@@ -34,6 +48,32 @@ export default function PatientChat({ turns, onTurns, ask, onTypingChange, peer 
 
   // never leave the clock paused if the tab is switched while the field is focused
   useEffect(() => () => onTypingChange(false), [onTypingChange]);
+
+  // Voice input (Chrome / Android / Safari): speak, and the question is sent when the phrase ends
+  useEffect(() => () => recRef.current?.stop(), []);
+  const listen = () => {
+    if (!SpeechRec || busy) return;
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    const rec = new SpeechRec();
+    rec.lang = lang === 'ar' ? 'ar-EG' : 'en-US';
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      const said = e.results[0]?.[0]?.transcript ?? '';
+      if (said.trim()) void send(said);
+    };
+    rec.onend = () => {
+      setListening(false);
+      onTypingChange(false);
+    };
+    rec.onerror = () => rec.onend?.();
+    recRef.current = rec;
+    onTypingChange(true); // keep the clock paused while talking
+    setListening(true);
+    rec.start();
+  };
 
   const send = async (raw: string) => {
     const question = raw.trim();
@@ -89,11 +129,16 @@ export default function PatientChat({ turns, onTurns, ask, onTypingChange, peer 
           onFocus={() => onTypingChange(true)}
           onBlur={() => onTypingChange(false)}
         />
+        {SpeechRec && (
+          <button type="button" className={`btn chat__mic${listening ? ' chat__mic--on' : ''}`} onClick={listen} disabled={busy} aria-label={t(listening ? 'chat.micListening' : 'chat.mic')} title={t('chat.mic')}>
+            {listening ? '●' : '🎤'}
+          </button>
+        )}
         <button type="submit" className="btn btn--primary" disabled={busy || !text.trim()}>
           {t('chat.send')}
         </button>
       </form>
-      <p className="sheet__muted chat__note">{doctor ? t('dchat.noteLocal') : t(aiIsRemote ? 'chat.noteRemote' : 'chat.noteLocal')}</p>
+      <p className="sheet__muted chat__note">{doctor ? t(aiIsRemote ? 'dchat.noteRemote' : 'dchat.noteLocal') : t(aiIsRemote ? 'chat.noteRemote' : 'chat.noteLocal')}</p>
     </div>
   );
 }

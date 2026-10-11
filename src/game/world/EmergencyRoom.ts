@@ -8,9 +8,11 @@ export interface RoomBuild {
   group: THREE.Group;
   colliders: Rect[];
   bounds: Rect;
+  /** Hand sanitizer the nurse can use (null when it could not be built). */
+  sanitizer: THREE.Object3D | null;
 }
 
-export function buildEmergencyRoom(profile: PatientProfile): RoomBuild {
+export function buildEmergencyRoom(profile: PatientProfile, options: { glucometer?: boolean } = {}): RoomBuild {
   const group = new THREE.Group();
   const colliders: Rect[] = [];
   const { minX, maxX, minZ, maxZ, height: H } = ROOM;
@@ -20,14 +22,14 @@ export function buildEmergencyRoom(profile: PatientProfile): RoomBuild {
   const cz = (minZ + maxZ) / 2;
 
   /** Place a GLB model (front faces -z; rotY turns it). Returns false when the model is unavailable so the caller can fall back. */
-  const place = (name: ModelName, x: number, y: number, z: number, rotY = 0, scale?: [number, number, number]): boolean => {
+  const place = (name: ModelName, x: number, y: number, z: number, rotY = 0, scale?: [number, number, number]): THREE.Group | null => {
     const m = cloneModel(name);
-    if (!m) return false;
+    if (!m) return null;
     m.position.set(x, y, z);
     m.rotation.y = rotY;
     if (scale) m.scale.set(...scale);
     group.add(m);
-    return true;
+    return m;
   };
   const QUARTER = Math.PI / 2;
 
@@ -137,7 +139,7 @@ export function buildEmergencyRoom(profile: PatientProfile): RoomBuild {
   group.add(box(0.012, 0.64, 0.74, 0xcfdadd, maxX - 0.355, 1.75, 0.8));
   group.add(box(0.012, 0.64, 0.74, 0xcfdadd, maxX - 0.355, 1.75, 1.6));
   if (!place('sharps', maxX, 1.15, 0.22, QUARTER)) group.add(box(0.2, 0.22, 0.2, 0xc0392b, maxX - 0.4, 1.04, 0.5)); // sharps bin
-  if (!place('sanitizer', maxX, 1.3, -0.15, QUARTER)) group.add(box(0.1, 0.2, 0.08, 0xffffff, maxX - 0.05, 1.25, -0.1)); // sanitizer dispenser
+  // (the sanitizer is by the bed, see below)
   group.add(blobShadow(1.0, 2.4, maxX - 0.3, 1.2));
   colliders.push({ minX: maxX - 0.65, maxX, minZ: 0.15, maxZ: 2.25 });
 
@@ -238,6 +240,14 @@ export function buildEmergencyRoom(profile: PatientProfile): RoomBuild {
   // Waste bin near door
   group.add(cyl(0.14, 0.12, 0.45, 0x607d8b, minX + 0.4, 0.225, 2.1));
 
+  // Hand sanitizer on the headwall, within reach of the bed
+  let sanitizer: THREE.Object3D | null = place('sanitizer', -1.6, 1.3, minZ, Math.PI);
+  if (!sanitizer) {
+    sanitizer = box(0.1, 0.2, 0.08, 0xffffff, -1.6, 1.25, minZ + 0.05);
+    group.add(sanitizer);
+  }
+  if (options.glucometer) place('glucometer', 1.28, 1.015, -1.42, QUARTER);
+
   // ---- Windows (daylight makes the bigger room feel open) ----
   const skyTex = canvasTexture(8, 64, (g) => {
     const grad = g.createLinearGradient(0, 0, 0, 64);
@@ -288,6 +298,7 @@ export function buildEmergencyRoom(profile: PatientProfile): RoomBuild {
 
   return {
     group,
+    sanitizer,
     colliders,
     bounds: { minX, maxX, minZ, maxZ },
   };
