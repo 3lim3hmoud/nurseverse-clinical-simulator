@@ -48,6 +48,9 @@ export class Simulator {
   private headAngle = 0;
   private headOverride: number | null = null;
   private updaters: ((x: number, z: number) => void)[] = [];
+  private focusAt: THREE.Vector3 | null = null;
+  private focusUntil = 0;
+  private alarmSound = true;
   private updaterClock = 0;
   private basePixelRatio = 1;
   private quality = 1;
@@ -184,6 +187,10 @@ export class Simulator {
     this.interaction.register(root, info, setHighlight);
   }
 
+  relabel(id: string, label: string): void {
+    this.interaction.relabel(id, label);
+  }
+
   unregisterExtra(root: THREE.Object3D): void {
     this.interaction.unregister(root);
   }
@@ -191,6 +198,38 @@ export class Simulator {
   /** Command the bed head angle (radians); null gives control back to the patient's own state. */
   setHeadTarget(rad: number | null): void {
     this.headOverride = rad;
+  }
+
+  /** Face a point for a few seconds (the nurse looks at the patient while a step is done). */
+  focusOn(x: number, y: number, z: number, seconds: number): void {
+    this.focusAt = new THREE.Vector3(x, y, z);
+    this.focusUntil = this.clock.elapsedTime + seconds;
+  }
+
+  /** Add a tube or cable that follows what it is attached to. */
+  addCable(points: () => THREE.Vector3[], radius: number, color: number): void {
+    this.world.addCable(points, radius, color);
+  }
+
+  /** Where the patient's mouth and nose are, in the room. */
+  mouthWorld(): THREE.Vector3 {
+    return this.world.patient.maskAnchor.getWorldPosition(new THREE.Vector3());
+  }
+
+  setAlarmSound(on: boolean): void {
+    this.alarmSound = on;
+  }
+
+  /** The patient coughs or moans on cue. */
+  patientSound(kind: 'cough' | 'moan'): void {
+    const gain = this.distanceGain(BED_POS, 7);
+    if (kind === 'cough') this.audio.cough(gain);
+    else this.audio.moan(gain);
+  }
+
+  /** Which way the player faces (radians, 0 = toward -z, positive turns left). */
+  playerYaw(): number {
+    return this.camera.rotation.y;
   }
 
   /** Where the player stands on the floor. */
@@ -277,6 +316,8 @@ export class Simulator {
     this.syncInterventions(interventions, dt);
     this.updateAlarm(vitals, time);
 
+    if (this.focusAt && this.clock.elapsedTime < this.focusUntil) this.controller.lookToward(this.focusAt.x, this.focusAt.y, this.focusAt.z, 1 - Math.exp(-5 * dt));
+    else this.focusAt = null;
     this.controller.update(dt);
     this.camera.updateMatrixWorld();
     if (this.controller.locked) this.interaction.update(dt);
@@ -337,7 +378,7 @@ export class Simulator {
 
     const ringing = this.alarm.active && !this.alarm.silenced;
     this.world.monitor.setAlarmLight(ringing && Math.floor(time * 2) % 2 === 0);
-    if (ringing && this.running) this.audio.alarm(this.distanceGain(MONITOR_POS, 6));
+    if (ringing && this.running && this.alarmSound) this.audio.alarm(this.distanceGain(MONITOR_POS, 6));
   }
 
   private nextCoughAt = 6;

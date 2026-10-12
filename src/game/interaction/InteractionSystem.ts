@@ -35,6 +35,11 @@ export class InteractionSystem {
     this.entries.push({ root, info, setHighlight });
   }
 
+  /** Change the text shown for something that is already registered (the procedure screen reuses the patient). */
+  relabel(id: string, label: string): void {
+    for (const e of this.entries) if (e.info.id === id) e.info = { ...e.info, label };
+  }
+
   unregister(root: THREE.Object3D): void {
     const entry = this.entries.find((e) => e.root === root);
     if (!entry) return;

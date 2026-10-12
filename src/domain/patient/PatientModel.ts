@@ -26,6 +26,7 @@ export class PatientModel {
   private simTime = 0;
   private listeners = new Set<Listener>();
   private drugs: { id: MedId; t0: number }[] = [];
+  private transients: { delta: Partial<Vitals>; t0: number; rampSec: number; holdSec: number; decaySec: number }[] = [];
 
   constructor(readonly profile: PatientProfile, initial: Vitals, private engine: PhysiologyEngine) {
     this.current = { ...initial };
@@ -93,6 +94,11 @@ export class PatientModel {
     this.drugs.push({ id, t0: this.simTime });
   }
 
+  /** A short-lived change (e.g. suctioning lowers the saturation for a moment): it ramps in, holds, then fades away. */
+  addTransient(delta: Partial<Vitals>, rampSec: number, holdSec: number, decaySec: number): void {
+    this.transients.push({ delta, t0: this.simTime, rampSec, holdSec, decaySec });
+  }
+
   /** Sum of the active drug effects, each scaled by how far it has ramped in. */
   private drugDelta(): Partial<Vitals> {
     const sum: Partial<Vitals> = {};
@@ -101,6 +107,12 @@ export class PatientModel {
       if (!effect) continue;
       const k = clamp((this.simTime - d.t0) / effect.rampSec, 0, 1);
       for (const [key, value] of Object.entries(effect.delta) as [keyof Vitals, number][]) sum[key] = (sum[key] ?? 0) + value * k;
+    }
+    this.transients = this.transients.filter((x) => this.simTime - x.t0 < x.rampSec + x.holdSec + x.decaySec);
+    for (const x of this.transients) {
+      const age = this.simTime - x.t0;
+      const k = age < x.rampSec ? age / x.rampSec : age < x.rampSec + x.holdSec ? 1 : 1 - (age - x.rampSec - x.holdSec) / x.decaySec;
+      for (const [key, value] of Object.entries(x.delta) as [keyof Vitals, number][]) sum[key] = (sum[key] ?? 0) + value * clamp(k, 0, 1);
     }
     return sum;
   }
@@ -145,8 +157,8 @@ export class PatientModel {
     const fx = this.drugDelta();
     this.current = {
       heartRate: Math.round(raw.heartRate + d.hr + (fx.heartRate ?? 0)),
-      spo2: Math.min(100, Math.round(raw.spo2 + d.spo2)),
-      respiratoryRate: Math.max(4, Math.round(raw.respiratoryRate + d.rr)),
+      spo2: Math.max(0, Math.min(100, Math.round(raw.spo2 + d.spo2 + (fx.spo2 ?? 0)))),
+      respiratoryRate: raw.respiratoryRate === 0 ? 0 : Math.max(4, Math.round(raw.respiratoryRate + d.rr)),
       systolic: Math.round(raw.systolic + d.sys),
       diastolic: Math.round(raw.diastolic + d.dia),
       temperatureC: Math.round((raw.temperatureC + (fx.temperatureC ?? 0)) * 10) / 10,

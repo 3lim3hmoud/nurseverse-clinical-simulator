@@ -25,6 +25,8 @@ export interface ClinicalScene {
   curtains: CurtainRig;
   medCart: MedCartRig;
   sanitizer: { root: THREE.Object3D; setHighlight(on: boolean): void } | null;
+  /** A tube or cable between two moving points (re-routed every frame). */
+  addCable(points: () => THREE.Vector3[], radius: number, color: number): void;
   setLegAngle(angle: number): void;
   setHeadAngle(angle: number): void;
   setOxygenVisual(setup: OxygenSetup | null): void;
@@ -140,6 +142,7 @@ export function buildClinicalScene(profile: PatientProfile, options: { glucomete
     iv,
     curtains,
     medCart,
+    addCable: (points, radius, color) => void addCable(points, radius, color),
     sanitizer: room.sanitizer ? { root: room.sanitizer, setHighlight: makeHighlightable(room.sanitizer) } : null,
     setLegAngle(angle) {
       bed.setLegAngle(angle);

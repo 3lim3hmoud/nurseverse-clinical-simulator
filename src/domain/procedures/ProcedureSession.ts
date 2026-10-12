@@ -1,9 +1,11 @@
-import { allItems, PROCEDURES } from './catalog';
+import { allItems, isBedsideFixture, PROCEDURES } from './catalog';
 import type { EquipItem, Mode, ProcedureDef, ProcStep } from './types';
 
 /** An item laid out on the supply tables. `extra` ones are not needed (exam distractors). */
 export interface SceneItem extends EquipItem {
   extra: boolean;
+  /** already at the bedside: counted as ready, never put on a table */
+  fixture: boolean;
 }
 
 /** One thing the nurse can choose to do. Exam lists also contain steps of other procedures (stepIndex = null). */
@@ -102,7 +104,7 @@ export class ProcedureSession {
   ) {
     this.t0 = now();
     const rnd = mulberry32(seed);
-    const required: SceneItem[] = allItems(def).map((i) => ({ ...i, extra: false }));
+    const required: SceneItem[] = allItems(def).map((i) => ({ ...i, extra: false, fixture: isBedsideFixture(i) }));
     const stepActions: ActionRef[] = def.steps.map((s) => ({ key: `s${s.index}`, stepIndex: s.index, en: s.en, ar: s.ar }));
 
     if (mode === 'exam') {
@@ -115,7 +117,7 @@ export class ProcedureSession {
         seen.add(k);
         return true;
       });
-      const extras = distractors.slice(0, 6).map((i): SceneItem => ({ ...i, id: `x-${i.id}`, group: Math.floor(rnd() * Math.max(1, def.groups.length)), extra: true }));
+      const extras = distractors.slice(0, 6).map((i): SceneItem => ({ ...i, id: `x-${i.id}`, group: Math.floor(rnd() * Math.max(1, def.groups.length)), extra: true, fixture: false }));
       this.items = [...required, ...extras];
 
       const stepKeys = new Set(def.steps.map((s) => norm(s.en)));
@@ -134,14 +136,23 @@ export class ProcedureSession {
   }
 
   // ---- equipment ----
+  /** What has to be collected: everything that is not already at the bedside. */
   get required(): EquipItem[] {
-    return this.items.filter((i) => !i.extra);
+    return this.items.filter((i) => !i.extra && !i.fixture);
+  }
+  /** Items to lay out on the supply tables. */
+  tableItems(): SceneItem[] {
+    return this.items.filter((i) => !i.fixture);
+  }
+  fixtures(): SceneItem[] {
+    return this.items.filter((i) => i.fixture);
   }
   has(id: string): boolean {
     return this.tray.has(id);
   }
+  /** The items the nurse picked up (not the bedside fixtures). */
   trayItems(): SceneItem[] {
-    return this.items.filter((i) => this.tray.has(i.id));
+    return this.items.filter((i) => !i.fixture && this.tray.has(i.id));
   }
   missing(): EquipItem[] {
     return this.required.filter((i) => !this.tray.has(i.id));
@@ -150,7 +161,7 @@ export class ProcedureSession {
   /** Put an item in the tray. An item that is not needed is an error (exam). */
   pick(id: string): { ok: boolean; extra: boolean } {
     const item = this.items.find((i) => i.id === id);
-    if (!item || this.tray.has(id) || this.endedAt !== null) return { ok: false, extra: false };
+    if (!item || item.fixture || this.tray.has(id) || this.endedAt !== null) return { ok: false, extra: false };
     this.tray.add(id);
     if (item.extra) this.errors.push({ t: this.elapsed(), type: 'extra-item', detail: item.en });
     return { ok: true, extra: item.extra };

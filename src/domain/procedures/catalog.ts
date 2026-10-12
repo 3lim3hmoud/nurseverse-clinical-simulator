@@ -135,3 +135,13 @@ export const getProcedure = (id: string): ProcedureDef => {
 };
 
 export const allItems = (def: ProcedureDef): EquipItem[] => def.groups.flatMap((g) => g.items);
+
+/**
+ * Equipment that is already in the room at the bedside (wall oxygen and suction, the monitor, the ventilator,
+ * the crash cart, the pump). It is not carried: the nurse only has to be at the bedside to use it.
+ */
+const FIXTURE = /mechanical ventilator|oxygen (supply|source|flowmeter)|medical air|pulse oximeter|cardiac monitor|ecg monitor|hemodynamic monitor|blood pressure monitor|infusion pump|crash cart|suction apparatus|suction device/i;
+export const isBedsideFixture = (item: { en: string }): boolean => FIXTURE.test(item.en);
+
+/** Procedures where the patient is on a ventilator (the ventilator stands at the head of the bed). */
+export const VENTILATED: ProcedureId[] = ['mv', 'vap'];

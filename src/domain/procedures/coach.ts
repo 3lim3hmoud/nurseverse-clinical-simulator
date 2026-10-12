@@ -44,11 +44,11 @@ function whereToGo(step: ProcStep, state: CoachState): string {
   const { lang, session } = state;
   switch (step.kind) {
     case 'hygiene':
-      return pick(lang, 'Go to the hand sanitizer on the wall left of the headboard, then do this step.', 'اذهب إلى معقم اليدين على الحائط يسار رأس السرير ثم نفّذ الخطوة.');
+      return pick(lang, 'Go to the hand-hygiene station (the stand with the blue sign in front of the bed area), aim at the sanitizer and press E.', 'اذهب إلى محطة نظافة اليدين (العمود ذو اللافتة الزرقاء أمام منطقة السرير)، صوّب على المعقم واضغط E.');
     case 'gather':
       return pick(lang, `Collect everything from the supply tables first:\n${missingByTable(state)}`, `اجمع كل الأدوات من طاولات المستلزمات أولاً:\n${missingByTable(state)}`);
     case 'position':
-      return pick(lang, 'Use the bed control on the right rail to raise the head to 30–45°, then do this step.', 'استخدم مفتاح السرير على الدرابزين الأيمن لرفع الرأس إلى 30–45 درجة ثم نفّذ الخطوة.');
+      return pick(lang, 'Use the bed control (the post beside the bed): aim at it and press E until the head is at 30–45°, then do this step.', 'استخدم مفتاح السرير (العمود بجانب السرير): صوّب عليه واضغط E حتى يصبح الرأس 30–45 درجة ثم نفّذ الخطوة.');
     default:
       if (session.def.gateIndex !== null && step.index >= session.def.gateIndex && session.missing().length > 0) {
         return pick(lang, `You still need equipment:\n${missingByTable(state)}`, `ما زال ينقصك:\n${missingByTable(state)}`);
@@ -62,8 +62,8 @@ export function introMessage(state: CoachState): string {
   const title = lang === 'ar' ? session.def.titleAr : session.def.titleEn;
   return pick(
     lang,
-    `I am your coach for ${title}. Ask me what is next, why, how, or what equipment you are missing.`,
-    `أنا مدربك في ${title}. اسألني عن الخطوة التالية أو السبب أو الطريقة أو الأدوات الناقصة.`,
+    `I am your coach for ${title}. Start by washing your hands at the hand-hygiene station (blue sign). Ask me what is next, why, how, or what equipment you are missing.`,
+    `أنا مدربك في ${title}. ابدأ بغسل يديك عند محطة نظافة اليدين (اللافتة الزرقاء). اسألني عن الخطوة التالية أو السبب أو الطريقة أو الأدوات الناقصة.`,
   );
 }
 
@@ -84,11 +84,11 @@ export function blockMessage(state: CoachState, check: Extract<Check, { ok: fals
     case 'equipment':
       return pick(lang, `You still need equipment:\n${missingByTable(state)}`, `ما زال ينقصك:\n${missingByTable(state)}`);
     case 'sanitizer':
-      return pick(lang, 'Go to the hand sanitizer first (wall, left of the headboard).', 'اذهب إلى معقم اليدين أولاً (الحائط يسار رأس السرير).');
+      return pick(lang, 'Go to the hand sanitizer first: the hand-hygiene station (blue sign) in front of the bed area.', 'اذهب إلى معقم اليدين أولاً: محطة نظافة اليدين (اللافتة الزرقاء) أمام منطقة السرير.');
     case 'bed':
       return pick(lang, 'Go next to the patient first.', 'اقترب من المريض أولاً.');
     case 'position':
-      return pick(lang, 'Raise the bed head to 30–45° with the bed control on the right rail.', 'ارفع رأس السرير إلى 30–45 درجة بمفتاح السرير على الدرابزين الأيمن.');
+      return pick(lang, 'Raise the bed head to 30–45° with the bed control (the post beside the bed, press E).', 'ارفع رأس السرير إلى 30–45 درجة بمفتاح السرير (العمود بجانب السرير، اضغط E).');
     case 'distractor':
       return pick(lang, 'That is not part of this procedure.', 'هذه الخطوة ليست من هذا الإجراء.');
     case 'done':
@@ -127,8 +127,8 @@ export function coachAnswer(state: CoachState, question: string): string {
     return pick(lang, `Step ${next.n}: ${next.en}\nWhat you do (as in your course sheet): ${next.doing}`, `الخطوة ${next.n}: ${next.ar}\nما الذي أفعله: ${next.doing}`);
   }
   if (any(q, HYGIENE) && next?.kind === 'hygiene') return whereToGo(next, state);
-  if (any(q, HYGIENE)) return pick(lang, 'The hand sanitizer is on the wall, left of the headboard.', 'معقم اليدين على الحائط يسار رأس السرير.');
-  if (any(q, BED)) return pick(lang, 'The bed control is on the right rail of the bed. Each press raises the head: 0°, 15°, 30°, 45°, 60°.', 'مفتاح السرير على الدرابزين الأيمن. كل ضغطة ترفع الرأس: 0 و15 و30 و45 و60 درجة.');
+  if (any(q, HYGIENE)) return pick(lang, 'The hand sanitizer is at the hand-hygiene station (stand with the blue sign, in front of the bed area).', 'معقم اليدين في محطة نظافة اليدين (العمود ذو اللافتة الزرقاء أمام منطقة السرير).');
+  if (any(q, BED)) return pick(lang, 'The bed control is the post beside the bed. Each press (E) raises the head: 0°, 15°, 30°, 45°, 60°.', 'مفتاح السرير هو العمود بجانب السرير. كل ضغطة (E) ترفع الرأس: 0 و15 و30 و45 و60 درجة.');
   if (any(q, NEXT)) {
     if (!next) return pick(lang, 'All steps are done. Press Finish.', 'تمت كل الخطوات. اضغط إنهاء.');
     if (!session.def.ordered) {

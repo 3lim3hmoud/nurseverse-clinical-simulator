@@ -3,8 +3,9 @@ import { PLAYER_START, type Rect } from '../layout';
 
 const EYE_HEIGHT = 1.65;
 const RADIUS = 0.28;
-const WALK_SPEED = 2.0;
-const SPRINT_MULT = 1.6;
+const WALK_SPEED = 2.6; // the room is big: a brisk walk
+const SPRINT_MULT = 1.7;
+const TOUCH_RUN_AT = 0.9; // pushing the joystick almost to the edge runs
 const MOUSE_SENS = 0.0022;
 const TOUCH_SENS = 0.0055;
 
@@ -86,13 +87,24 @@ export class FirstPersonController {
     if (document.pointerLockElement === this.dom) document.exitPointerLock();
   }
 
+  /** Turn the view toward a point (k = 0..1 of the way, per call). Used to face the patient while a step is performed. */
+  lookToward(x: number, y: number, z: number, k: number): void {
+    const dx = x - this.pos.x;
+    const dz = z - this.pos.z;
+    const yawT = Math.atan2(-dx, -dz);
+    const d = Math.atan2(Math.sin(yawT - this.yaw), Math.cos(yawT - this.yaw));
+    this.yaw += d * k;
+    this.pitch += (Math.atan2(y - EYE_HEIGHT, Math.hypot(dx, dz)) - this.pitch) * k;
+  }
+
   update(dt: number): void {
     const kbForward = (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0);
     const kbStrafe = (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
     const forward = Math.max(-1, Math.min(1, kbForward + this.touchMove.y));
     const strafe = Math.max(-1, Math.min(1, kbStrafe + this.touchMove.x));
 
-    const speed = WALK_SPEED * (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? SPRINT_MULT : 1);
+    const running = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || Math.hypot(this.touchMove.x, this.touchMove.y) > TOUCH_RUN_AT;
+    const speed = WALK_SPEED * (running ? SPRINT_MULT : 1);
     const sin = Math.sin(this.yaw);
     const cos = Math.cos(this.yaw);
     const len = Math.max(1, Math.hypot(forward, strafe)); // keeps partial joystick speed, normalizes diagonals
