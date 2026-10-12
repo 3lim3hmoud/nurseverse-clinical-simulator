@@ -1,3 +1,4 @@
+import { procAr } from './proc-ar';
 import { featuresAr } from './features-ar';
 import { extraAr } from './extra-ar';
 /** Arabic strings (same keys as en.ts). */
@@ -268,4 +269,5 @@ export const ar: Record<string, string> = {
 
   ...extraAr,
   ...featuresAr,
+  ...procAr,
 };

@@ -16,7 +16,7 @@ export interface PatientContext {
 }
 
 export interface ChatTurn {
-  from: 'nurse' | 'patient' | 'doctor';
+  from: 'nurse' | 'patient' | 'doctor' | 'coach';
   text: string;
 }
 

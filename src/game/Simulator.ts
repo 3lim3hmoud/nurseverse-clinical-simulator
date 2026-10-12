@@ -6,7 +6,7 @@ import type { Interventions } from '../domain/physiology/interventions';
 import { AudioEngine } from './audio/AudioEngine';
 import { FirstPersonController } from './controls/FirstPersonController';
 import { InteractionSystem, type InteractableInfo } from './interaction/InteractionSystem';
-import { BED_POS, INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS } from './layout';
+import { BED_POS, INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS, type Rect } from './layout';
 import { buildClinicalScene, type ClinicalScene } from './world/ClinicalScene';
 import { disposeScene } from './world/helpers';
 
@@ -46,6 +46,13 @@ export class Simulator {
 
   private running = false;
   private headAngle = 0;
+  private headOverride: number | null = null;
+  private updaters: ((x: number, z: number) => void)[] = [];
+  private updaterClock = 0;
+  private basePixelRatio = 1;
+  private quality = 1;
+  private perfTime = 0;
+  private perfFrames = 0;
   private legAngle = 0;
   private lastVitals: ReturnType<PatientModel['getVitals']> | null = null;
   private lastInterventions: Interventions | null = null;
@@ -56,7 +63,8 @@ export class Simulator {
     const dpr = window.devicePixelRatio || 1;
     this.renderer = new THREE.WebGLRenderer({ antialias: dpr <= 1 });
     const coarse = window.matchMedia('(pointer: coarse)').matches;
-    this.renderer.setPixelRatio(Math.min(dpr, coarse ? 1.25 : 1.5)); // lighter on phones
+    this.basePixelRatio = Math.min(dpr, coarse ? 1.25 : 1.5); // lighter on phones
+    this.renderer.setPixelRatio(this.basePixelRatio);
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 30);
@@ -159,6 +167,59 @@ export class Simulator {
     this.audio.setMuted(muted);
   }
 
+  // ---- extras used by the procedure mode ----
+
+  /** Add props (and their collision) to the room. */
+  addExtras(group: THREE.Object3D, colliders: Rect[] = []): void {
+    this.world.scene.add(group);
+    this.world.colliders.push(...colliders);
+  }
+
+  /** Run something a few times a second with the player's position (cheap level-of-detail work). */
+  addUpdater(fn: (x: number, z: number) => void): void {
+    this.updaters.push(fn);
+  }
+
+  registerExtra(root: THREE.Object3D, info: InteractableInfo, setHighlight?: (on: boolean) => void): void {
+    this.interaction.register(root, info, setHighlight);
+  }
+
+  unregisterExtra(root: THREE.Object3D): void {
+    this.interaction.unregister(root);
+  }
+
+  /** Command the bed head angle (radians); null gives control back to the patient's own state. */
+  setHeadTarget(rad: number | null): void {
+    this.headOverride = rad;
+  }
+
+  /** Where the player stands on the floor. */
+  playerXZ(): { x: number; z: number } {
+    return { x: this.camera.position.x, z: this.camera.position.z };
+  }
+
+  /**
+   * Keeps the frame rate smooth on weak GPUs by lowering the render resolution when it drops below ~40 fps
+   * for two seconds (down to 60%), and raising it again when there is room. Off in dev, so tests stay deterministic.
+   */
+  private governResolution(rawDt: number): void {
+    if (import.meta.env.DEV) return;
+    this.perfTime += rawDt;
+    this.perfFrames++;
+    if (this.perfTime < 2) return;
+    const fps = this.perfFrames / this.perfTime;
+    this.perfTime = 0;
+    this.perfFrames = 0;
+    let next = this.quality;
+    if (fps < 40) next = Math.max(0.6, this.quality - 0.15);
+    else if (fps > 57) next = Math.min(1, this.quality + 0.1);
+    if (next !== this.quality) {
+      this.quality = next;
+      this.renderer.setPixelRatio(this.basePixelRatio * next);
+      this.resize();
+    }
+  }
+
   /** Opens the privacy curtains if closed, closes them if open. Returns true when they are now closed. */
   toggleCurtains(): boolean {
     this.world.curtains.setClosed(!this.world.curtains.closed);
@@ -197,7 +258,14 @@ export class Simulator {
   }
 
   private tick = () => {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const raw = this.clock.getDelta();
+    const dt = Math.min(raw, 0.05);
+    this.governResolution(raw);
+    this.updaterClock += raw;
+    if (this.updaterClock > 0.12 && this.updaters.length) {
+      this.updaterClock = 0;
+      for (const fn of this.updaters) fn(this.camera.position.x, this.camera.position.z);
+    }
     const time = this.clock.elapsedTime;
     const simDt = this.running ? dt : 0;
 
@@ -232,7 +300,7 @@ export class Simulator {
       this.world.setOxygenVisual(iv.oxygen);
     }
 
-    const target = iv.headElevated ? HEAD_RAISED : 0;
+    const target = this.headOverride ?? (iv.headElevated ? HEAD_RAISED : 0);
     const diff = target - this.headAngle;
     if (Math.abs(diff) > 0.0005) {
       this.headAngle += Math.sign(diff) * Math.min(1.2 * dt, Math.abs(diff));

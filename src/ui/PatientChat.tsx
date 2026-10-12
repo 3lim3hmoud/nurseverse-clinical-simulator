@@ -7,6 +7,7 @@ const QUICK = ['complaint', 'onset', 'pain', 'allergies', 'meds', 'pmh', 'intake
 
 /** Quick questions for the on-call doctor. */
 const DOCTOR_QUICK = ['report', 'advice', 'arrive', 'paracetamol'] as const;
+const COACH_QUICK = ['next', 'why', 'equipment', 'steps'] as const;
 
 interface Props {
   turns: ChatTurn[];
@@ -14,7 +15,7 @@ interface Props {
   ask: (question: string, history: readonly ChatTurn[]) => Promise<{ text: string }>;
   onTypingChange: (typing: boolean) => void;
   /** Who the nurse is talking to (default: the patient). */
-  peer?: 'patient' | 'doctor';
+  peer?: 'patient' | 'doctor' | 'coach';
 }
 
 interface Recognition {
@@ -32,8 +33,9 @@ const SpeechRec: (new () => Recognition) | undefined =
 export default function PatientChat({ turns, onTurns, ask, onTypingChange, peer = 'patient' }: Props) {
   const { t, lang } = useI18n();
   const doctor = peer === 'doctor';
-  const quick = doctor ? DOCTOR_QUICK : QUICK;
-  const prefix = doctor ? 'dchat' : 'chat';
+  const coach = peer === 'coach';
+  const quick = coach ? COACH_QUICK : doctor ? DOCTOR_QUICK : QUICK;
+  const prefix = coach ? 'pcoach' : doctor ? 'dchat' : 'chat';
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
@@ -138,7 +140,7 @@ export default function PatientChat({ turns, onTurns, ask, onTypingChange, peer 
           {t('chat.send')}
         </button>
       </form>
-      <p className="sheet__muted chat__note">{doctor ? t(aiIsRemote ? 'dchat.noteRemote' : 'dchat.noteLocal') : t(aiIsRemote ? 'chat.noteRemote' : 'chat.noteLocal')}</p>
+      <p className="sheet__muted chat__note">{coach ? t(aiIsRemote ? 'pcoach.noteRemote' : 'pcoach.noteLocal') : doctor ? t(aiIsRemote ? 'dchat.noteRemote' : 'dchat.noteLocal') : t(aiIsRemote ? 'chat.noteRemote' : 'chat.noteLocal')}</p>
     </div>
   );
 }

@@ -14,6 +14,7 @@ export { recordRun, summarize, type ProgressSummary } from './progress';
 const ENDPOINT = (import.meta.env.VITE_AI_ENDPOINT as string | undefined)?.trim() || '';
 
 export const aiIsRemote = ENDPOINT !== '';
+export const aiEndpoint = (): string => ENDPOINT;
 
 const localPatient = new LocalPatientConversation();
 const localDebrief = new LocalDebriefing();
