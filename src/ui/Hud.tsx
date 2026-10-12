@@ -23,7 +23,7 @@ export default function Hud({ title, objective, target, touch, panelOpen, muted 
       {!panelOpen && <div className={`crosshair${target ? ' crosshair--active' : ''}`} aria-hidden="true" />}
       {target && !panelOpen && (
         <div className="hud__prompt" dir={dir}>
-          <kbd>E</kbd> {t(target.labelKey)}
+          <kbd>E</kbd> {target.label ?? t(target.labelKey)}
         </div>
       )}
     </>

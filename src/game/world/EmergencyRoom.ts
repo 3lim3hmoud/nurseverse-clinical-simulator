@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { PatientProfile } from '../../domain/patient/types';
 import { ROOM, rectAround, type Rect } from '../layout';
 import { blobShadow, box, canvasTexture, cyl, lambert } from './helpers';
-import { cloneModel, type ModelName } from './models';
+import { cloneModel, mergeRoomStatics, type ModelName } from './models';
 
 export interface RoomBuild {
   group: THREE.Group;
@@ -74,8 +74,8 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
 
   // Ceiling light panels (grid over the whole room)
   const panelMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  for (const x of [-3.6, 0, 3.6]) {
-    for (const z of [-1.4, 1.4, 4.2]) {
+  for (const x of [-4.8, 0, 4.8]) {
+    for (const z of [-1.4, 1.4, 4.2, 7]) {
       const panel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.04, 0.5), panelMat);
       panel.position.set(x, H - 0.02, z);
       group.add(panel);
@@ -114,12 +114,12 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
   group.add(sign);
 
   // Crash cart (right side, drawers face the bed) with the defibrillator on top
-  if (place('crashCart', 2.3, 0, -0.6, QUARTER)) {
-    place('defibrillator', 2.3, 0.95, -0.6, QUARTER);
-    group.add(blobShadow(0.9, 1.1, 2.3, -0.6));
+  if (place('crashCart', 3.5, 0, 0, QUARTER)) {
+    place('defibrillator', 3.5, 0.95, 0, QUARTER);
+    group.add(blobShadow(0.9, 1.1, 3.5, 0));
   } else {
     const cart = new THREE.Group();
-    cart.position.set(2.3, 0, -0.6);
+    cart.position.set(3.5, 0, 0);
     cart.add(box(0.5, 0.85, 0.62, 0xc0392b, 0, 0.45, 0));
     cart.add(box(0.54, 0.04, 0.66, 0xaab7bb, 0, 0.9, 0));
     for (let i = 0; i < 4; i++) {
@@ -128,9 +128,9 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
     }
     cart.add(box(0.28, 0.16, 0.38, 0x37474f, 0.02, 1.0, 0));
     cart.add(box(0.005, 0.09, 0.2, 0x66ffcc, -0.121, 1.0, 0));
-    group.add(cart, blobShadow(0.9, 1.0, 2.3, -0.6));
+    group.add(cart, blobShadow(0.9, 1.0, 3.5, 0));
   }
-  colliders.push(rectAround(2.3, -0.6, 0.3, 0.42));
+  colliders.push(rectAround(3.5, 0, 0.3, 0.42));
 
   // Counter + wall cabinet (right wall)
   group.add(box(0.6, 0.9, 2.0, 0xf1f5f6, maxX - 0.32, 0.45, 1.2));
@@ -144,24 +144,24 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
   colliders.push({ minX: maxX - 0.65, maxX, minZ: 0.15, maxZ: 2.25 });
 
   // Bedside cabinet (drawer faces the bed) with a few things on top
-  if (place('bedsideCabinet', 0.95, 0, -0.7, QUARTER)) {
-    group.add(blobShadow(0.8, 0.8, 0.95, -0.7));
-    place('waterJug', 1.04, 0.8, -0.82);
-    place('drinkingCup', 0.9, 0.8, -0.84);
-    place('tissueBox', 0.97, 0.8, -0.58, QUARTER);
+  if (place('bedsideCabinet', 1.75, 0, -0.8, QUARTER)) {
+    group.add(blobShadow(0.8, 0.8, 1.75, -0.8));
+    place('waterJug', 1.84, 0.8, -0.92);
+    place('drinkingCup', 1.7, 0.8, -0.94);
+    place('tissueBox', 1.77, 0.8, -0.68, QUARTER);
   } else {
-    group.add(box(0.45, 0.72, 0.45, 0xf1f5f6, 0.95, 0.36, -0.7));
-    group.add(box(0.5, 0.03, 0.5, 0xa9b7bb, 0.95, 0.735, -0.7));
-    group.add(box(0.012, 0.2, 0.36, 0xdde3e5, 0.72, 0.5, -0.7));
-    group.add(blobShadow(0.8, 0.8, 0.95, -0.7));
+    group.add(box(0.45, 0.72, 0.45, 0xf1f5f6, 1.75, 0.36, -0.8));
+    group.add(box(0.5, 0.03, 0.5, 0xa9b7bb, 1.75, 0.735, -0.8));
+    group.add(box(0.012, 0.2, 0.36, 0xdde3e5, 1.52, 0.5, -0.8));
+    group.add(blobShadow(0.8, 0.8, 1.75, -0.8));
   }
-  colliders.push(rectAround(0.95, -0.7, 0.26, 0.26));
+  colliders.push(rectAround(1.75, -0.8, 0.26, 0.26));
 
   // Overbed table beside the bed, its arm reaching over the mattress edge
-  if (place('overbedTable', 1.35, 0, -1.35, QUARTER)) {
-    place('pillBottle', 0.95, 1.015, -1.3);
-    group.add(blobShadow(1.0, 0.6, 1.1, -1.35));
-    colliders.push({ minX: 0.6, maxX: 1.5, minZ: -1.6, maxZ: -1.1 });
+  if (place('overbedTable', 2.5, 0, -1.6, QUARTER)) {
+    place('pillBottle', 2.15, 1.015, -1.6);
+    group.add(blobShadow(1.0, 0.6, 2.2, -1.6));
+    colliders.push({ minX: 1.75, maxX: 2.65, minZ: -1.85, maxZ: -1.35 });
   }
 
   // Door (left wall) with window and handle
@@ -205,7 +205,7 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
     g.stroke();
   });
   const clock = new THREE.Mesh(new THREE.CircleGeometry(0.2, 28), new THREE.MeshBasicMaterial({ map: clockTex }));
-  clock.position.set(2.0, 2.5, minZ + 0.012);
+  clock.position.set(4.6, 2.6, minZ + 0.012);
   group.add(clock);
 
   // Whiteboard with the patient's details
@@ -223,7 +223,7 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
     profile.boardLines.forEach((line, i) => g.fillText(line, 28, 118 + i * 50));
   });
   const board = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.75), new THREE.MeshBasicMaterial({ map: boardTex }));
-  board.position.set(2.0, 1.75, minZ + 0.012);
+  board.position.set(4.6, 1.75, minZ + 0.012);
   group.add(board);
 
   // Hand-wash sink (left wall)
@@ -241,12 +241,12 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
   group.add(cyl(0.14, 0.12, 0.45, 0x607d8b, minX + 0.4, 0.225, 2.1));
 
   // Hand sanitizer on the headwall, within reach of the bed
-  let sanitizer: THREE.Object3D | null = place('sanitizer', -1.6, 1.3, minZ, Math.PI);
+  let sanitizer: THREE.Object3D | null = place('sanitizer', -2.35, 1.3, minZ, Math.PI);
   if (!sanitizer) {
-    sanitizer = box(0.1, 0.2, 0.08, 0xffffff, -1.6, 1.25, minZ + 0.05);
+    sanitizer = box(0.1, 0.2, 0.08, 0xffffff, -2.35, 1.25, minZ + 0.05);
     group.add(sanitizer);
   }
-  if (options.glucometer) place('glucometer', 1.28, 1.015, -1.42, QUARTER);
+  if (options.glucometer) place('glucometer', 2.4, 1.015, -1.55, QUARTER);
 
   // ---- Windows (daylight makes the bigger room feel open) ----
   const skyTex = canvasTexture(8, 64, (g) => {
@@ -273,11 +273,9 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
     win.add(box(w, 0.04, 0.04, f, 0, 0, 0.03));
     group.add(win);
   };
-  addWindow(maxX - 0.01, -0.9, -QUARTER);
-  addWindow(maxX - 0.01, 3.1, -QUARTER);
-  addWindow(minX + 0.01, 3.2, QUARTER);
-  addWindow(-2.6, maxZ - 0.01, Math.PI);
-  addWindow(2.6, maxZ - 0.01, Math.PI);
+  for (const z of [-1.2, 2.4, 5.6]) addWindow(maxX - 0.01, z, -QUARTER);
+  for (const z of [-1.2, 3.4, 6.2]) addWindow(minX + 0.01, z, QUARTER);
+  for (const x of [-4.8, -1.6, 1.6, 4.8]) addWindow(x, maxZ - 0.01, Math.PI);
 
   // ---- Chairs: one beside the bed for visitors, two by the right wall with a small table ----
   const addChair = (x: number, z: number, rotY: number) => {
@@ -290,11 +288,14 @@ export function buildEmergencyRoom(profile: PatientProfile, options: { glucomete
     group.add(chair, blobShadow(0.7, 0.7, x, z));
     colliders.push(rectAround(x, z, 0.26, 0.26));
   };
-  addChair(-1.45, -0.55, -QUARTER); // faces the bed
-  addChair(maxX - 0.7, 3.7, QUARTER);
-  addChair(maxX - 0.7, 4.6, QUARTER);
-  group.add(cyl(0.28, 0.28, 0.04, 0xe9eef0, maxX - 0.7, 0.6, 4.15, 1, 20), cyl(0.04, 0.04, 0.58, 0x90a4ae, maxX - 0.7, 0.3, 4.15, 1, 8), blobShadow(0.9, 0.9, maxX - 0.7, 4.15));
-  colliders.push(rectAround(maxX - 0.7, 4.15, 0.3, 0.3));
+  addChair(-2.2, -0.6, -QUARTER); // faces the bed
+  // waiting corner by the left wall, away from the supply area
+  addChair(minX + 0.7, 5.0, -QUARTER);
+  addChair(minX + 0.7, 6.0, -QUARTER);
+  group.add(cyl(0.28, 0.28, 0.04, 0xe9eef0, minX + 0.7, 0.6, 5.5, 1, 20), cyl(0.04, 0.04, 0.58, 0x90a4ae, minX + 0.7, 0.3, 5.5, 1, 8), blobShadow(0.9, 0.9, minX + 0.7, 5.5));
+  colliders.push(rectAround(minX + 0.7, 5.5, 0.3, 0.3));
+
+  mergeRoomStatics(group, [sanitizer]); // hundreds of boxes -> a few dozen draw calls
 
   return {
     group,

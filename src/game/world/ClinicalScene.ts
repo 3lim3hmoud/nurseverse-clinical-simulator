@@ -64,7 +64,7 @@ export function buildClinicalScene(profile: PatientProfile, options: { glucomete
   const monitor = createPatientMonitor();
   monitor.display.setTitle(profile.bedLabel);
   monitor.group.position.copy(MONITOR_POS);
-  monitor.group.rotation.y = -0.3;
+  monitor.group.rotation.y = -0.5;
   scene.add(monitor.group);
   colliders.push(rectAround(MONITOR_POS.x, MONITOR_POS.z, 0.28, 0.28));
 
@@ -79,10 +79,10 @@ export function buildClinicalScene(profile: PatientProfile, options: { glucomete
 
   // Medication cart in the back right corner of the bed area, drawers facing the bed
   const medCart = createMedicationCart();
-  medCart.group.position.set(2.55, 0, -2.4);
+  medCart.group.position.set(3.6, 0, -2.3);
   medCart.group.rotation.y = -Math.PI / 2;
   scene.add(medCart.group);
-  colliders.push({ minX: 2.25, maxX: 2.85, minZ: -2.75, maxZ: -2.0 });
+  colliders.push({ minX: 3.3, maxX: 3.9, minZ: -2.65, maxZ: -1.95 });
 
   const oxygen = createOxygenDevice();
   oxygen.group.position.copy(OXYGEN_POS);
@@ -101,14 +101,12 @@ export function buildClinicalScene(profile: PatientProfile, options: { glucomete
   };
 
   addCable(
-    () => [
-      world(iv.bagPort),
-      rel(IV_POS, 0, 1.5, 0.06),
-      rel(IV_POS, 0.1, 1.2, 0.12),
-      rel(IV_POS, 0.3, 1.0, 0.06),
-      rel(IV_POS, 0.5, 0.93, -0.03),
-      world(patient.ivAnchor),
-    ],
+    () => {
+      const from = world(iv.bagPort);
+      const to = world(patient.ivAnchor);
+      const at = (k: number, y: number, dz: number) => new THREE.Vector3(from.x + (to.x - from.x) * k, y, from.z + (to.z - from.z) * k + dz);
+      return [from, at(0, 1.5, 0.06), at(0.25, 1.2, 0.12), at(0.6, 1.0, 0.08), at(0.85, 0.93, 0.02), to];
+    },
     0.005,
     0xeaf6fb,
   );
@@ -119,8 +117,8 @@ export function buildClinicalScene(profile: PatientProfile, options: { glucomete
     return [
       m,
       new THREE.Vector3(m.x - 0.12, m.y - 0.07, m.z - 0.03),
-      new THREE.Vector3(-0.52, 0.5 * (m.y + 0.9), (m.z + reg.z) / 2),
-      new THREE.Vector3(-0.72, 0.9, reg.z),
+      new THREE.Vector3(m.x + (reg.x - m.x) * 0.45, 0.5 * (m.y + 0.9), (m.z + reg.z) / 2),
+      new THREE.Vector3(m.x + (reg.x - m.x) * 0.85, 0.7, reg.z),
       reg,
     ];
   }, 0.007, 0xb7e4cf);

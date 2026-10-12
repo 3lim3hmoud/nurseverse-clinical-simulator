@@ -206,3 +206,47 @@ export function localBox(root: THREE.Object3D, meshName: string): THREE.Box3 | n
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   return box.applyMatrix4(inv);
 }
+
+/**
+ * Merge every static mesh under `group` into one mesh per material (a room built from hundreds of boxes
+ * becomes a few dozen draw calls). Objects in `exclude` (and everything below them) stay as they are:
+ * use it for anything that is aimed at, animated or highlighted.
+ */
+export function mergeRoomStatics(group: THREE.Group, exclude: (THREE.Object3D | null)[] = []): void {
+  group.updateMatrixWorld(true);
+  const skip = new Set(exclude.filter((o): o is THREE.Object3D => o !== null));
+  const inSkipped = (o: THREE.Object3D) => {
+    for (let p: THREE.Object3D | null = o; p && p !== group; p = p.parent) if (skip.has(p)) return true;
+    return false;
+  };
+  const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const merged: THREE.Mesh[] = [];
+
+  group.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh || Array.isArray(mesh.material) || inSkipped(mesh)) return;
+    if (!mesh.visible || mesh.userData.ignoreRay) return;
+    const geo = mesh.geometry.clone();
+    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld));
+    const list = byMaterial.get(mesh.material) ?? [];
+    list.push(geo);
+    byMaterial.set(mesh.material, list);
+    merged.push(mesh);
+  });
+
+  for (const mesh of merged) mesh.removeFromParent();
+  for (const [material, geos] of byMaterial) {
+    const withUv = geos.every((g) => g.getAttribute('uv'));
+    const indexed = geos.every((g) => g.index);
+    const prepared = geos.map((g) => {
+      for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && !(name === 'uv' && withUv)) g.deleteAttribute(name);
+      return indexed ? g : g.index ? g.toNonIndexed() : g;
+    });
+    const geometry = mergeGeometries(prepared, false);
+    if (!geometry) continue;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `static_${material.name || 'mat'}`;
+    group.add(mesh);
+  }
+}

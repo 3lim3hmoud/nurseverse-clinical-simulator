@@ -15,6 +15,9 @@ import ChatPanel from './ui/ChatPanel';
 import Hud from './ui/Hud';
 import IvPanel from './ui/IvPanel';
 import Menu from './ui/Menu';
+import ProcedureSimulation from './ProcedureSimulation';
+import { getProcedure } from './domain/procedures/catalog';
+import type { Mode, ProcedureId } from './domain/procedures/types';
 import MedsPanel from './ui/MedsPanel';
 import OxygenPanel from './ui/OxygenPanel';
 import PatientPanel, { type PatientActions } from './ui/PatientPanel';
@@ -33,9 +36,28 @@ const isTextField = (el: EventTarget | null) => el instanceof HTMLInputElement |
 
 export default function App() {
   useLang(); // re-render everything when the language changes
-  const [choice, setChoice] = useState<{ id: ScenarioId; run: number } | null>(null);
+  const [choice, setChoice] = useState<
+    { kind: 'case'; id: ScenarioId; run: number } | { kind: 'procedure'; id: ProcedureId; mode: Mode; run: number } | null
+  >(null);
 
-  if (!choice) return <Menu onPick={(id) => setChoice({ id, run: 1 })} />;
+  if (!choice)
+    return (
+      <Menu
+        onPick={(id) => setChoice({ kind: 'case', id, run: 1 })}
+        onPickProcedure={(id, mode) => setChoice({ kind: 'procedure', id, mode, run: 1 })}
+      />
+    );
+  if (choice.kind === 'procedure') {
+    return (
+      <ProcedureSimulation
+        key={`${choice.id}-${choice.mode}-${choice.run}`}
+        def={getProcedure(choice.id)}
+        mode={choice.mode}
+        onRestart={() => setChoice({ ...choice, run: choice.run + 1 })}
+        onMenu={() => setChoice(null)}
+      />
+    );
+  }
   return (
     <Simulation
       key={`${choice.id}-${choice.run}`}

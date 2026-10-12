@@ -25,9 +25,9 @@ interface PanelDef {
 }
 
 const BACK = -3; // bed headwall
-const LEFT = -1.9;
-const RIGHT = 1.85;
-const FOOT = 0.2;
+const LEFT = -2.7;
+const RIGHT = 2.7;
+const FOOT = 0.7;
 const THICK = 0.1;
 
 const PANELS: PanelDef[] = [

@@ -3,6 +3,8 @@ import * as THREE from 'three';
 export interface InteractableInfo {
   id: string;
   labelKey: string; // i18n key
+  /** Ready-made text (already translated) that is shown instead of the key. */
+  label?: string;
 }
 
 interface Entry {
@@ -31,6 +33,13 @@ export class InteractionSystem {
 
   register(root: THREE.Object3D, info: InteractableInfo, setHighlight?: (on: boolean) => void): void {
     this.entries.push({ root, info, setHighlight });
+  }
+
+  unregister(root: THREE.Object3D): void {
+    const entry = this.entries.find((e) => e.root === root);
+    if (!entry) return;
+    if (entry === this.current) this.clear();
+    this.entries = this.entries.filter((e) => e !== entry);
   }
 
   /** Raycasts ~20 times per second; objects in front (walls, bed...) block the ray. */
