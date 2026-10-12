@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import type { ProcedureSession, SceneItem } from '../../domain/procedures/ProcedureSession';
+import type { TableInfo } from '../../domain/procedures/guide';
+import { BED_CONTROL, HYGIENE_STATION } from '../../domain/procedures/layoutPoints';
 import { rectAround, ROOM, type Rect } from '../layout';
 import { blobShadow, box, canvasTexture, cyl } from './helpers';
+import { cloneModel, makeHighlightable } from './models';
 
 export interface PropItem {
   id: string;
@@ -19,6 +22,16 @@ export interface SupplyArea {
   colliders: Rect[];
   bedControl: THREE.Object3D;
   setBedControlHighlight(on: boolean): void;
+  /** Tables, in the order they were laid out (the signs show their numbers). */
+  tables: TableInfo[];
+  /** Floor-plan rectangles of the tables, for the minimap. */
+  rects: { cx: number; cz: number; w: number; d: number; number: number }[];
+  /** The hand-hygiene station (aim at it and press E). */
+  station: { root: THREE.Object3D; setHighlight(on: boolean): void };
+  /** The ventilator at the head of the bed, when this procedure has one. */
+  ventilator: { outlet: THREE.Object3D } | null;
+  /** A teal pillar of light on the place to go next (null hides it). */
+  setBeacon(p: { x: number; z: number } | null): void;
   /** Item name cards only show when the nurse is close: less to draw, and no wall of text from afar. */
   updateLabels(x: number, z: number): void;
 }
@@ -119,10 +132,12 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
   const group = new THREE.Group();
   const colliders: Rect[] = [];
   const items: PropItem[] = [];
+  const tableInfo: TableInfo[] = [];
+  const rects: SupplyArea['rects'] = [];
   const cards: { sprite: THREE.Sprite; x: number; z: number }[] = [];
 
   const byGroup = new Map<number, SceneItem[]>();
-  for (const it of session.items) byGroup.set(it.group, [...(byGroup.get(it.group) ?? []), it]);
+  for (const it of session.tableItems()) byGroup.set(it.group, [...(byGroup.get(it.group) ?? []), it]);
 
   // ---- place the tables: first along the right-hand side, then along the front wall ----
   const ROW_X = 5.0;
@@ -159,7 +174,11 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
     group.add(table, blobShadow(dx + 0.4, dz + 0.4, slot.x, slot.z));
     colliders.push(rectAround(slot.x, slot.z, dx / 2 + 0.05, dz / 2 + 0.05));
 
-    const sign = sprite(def?.en ?? 'Other supplies', def?.ar ?? 'مستلزمات أخرى', accentOf(g), 1.2);
+    const number = tableInfo.length + 1;
+    const stand = slot.alongZ ? { x: slot.x - 1.0, z: slot.z } : { x: slot.x, z: slot.z - 1.0 };
+    tableInfo.push({ ...stand, number, group: g, en: def?.en ?? 'Other supplies', ar: def?.ar ?? 'مستلزمات أخرى', itemIds: list.map((i) => i.id) });
+    rects.push({ cx: slot.x, cz: slot.z, w: dx, d: dz, number });
+    const sign = sprite(`${number} · ${def?.en ?? 'Other supplies'}`, `${number} · ${def?.ar ?? 'مستلزمات أخرى'}`, accentOf(g), 1.3);
     sign.position.set(slot.x, 1.55, slot.z);
     group.add(sign);
 
@@ -204,7 +223,7 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
   // ---- bed control: a pendant on a post beside the bed, at a height that is easy to aim at ----
   const control = new THREE.Group();
   control.name = 'bed-control';
-  control.position.set(0.85, 0, -1.15);
+  control.position.set(BED_CONTROL.x, 0, BED_CONTROL.z);
   control.add(cyl(0.018, 0.018, 1.0, 0x90a4ae, 0, 0.5, 0, 1, 8));
   control.add(cyl(0.12, 0.12, 0.025, 0x90a4ae, 0, 0.0125, 0, 1, 16));
   control.add(box(0.13, 0.08, 0.2, 0x2f3b42, 0, 1.04, 0));
@@ -219,11 +238,120 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
   group.add(control, blobShadow(0.4, 0.4, 0.85, -1.15));
   colliders.push(rectAround(0.85, -1.15, 0.14, 0.14));
 
+  // ---- bedside fixtures that are really in the room (not carried): ventilator, wall suction ----
+  let ventilator: SupplyArea['ventilator'] = null;
+  if (session.fixtures().some((i) => /mechanical ventilator/i.test(i.en))) {
+    const v = new THREE.Group();
+    v.position.set(-1.05, 0, -2.62);
+    v.add(cyl(0.22, 0.24, 0.04, 0x90a4ae, 0, 0.02, 0, 1, 20));
+    v.add(cyl(0.035, 0.035, 0.9, 0x90a4ae, 0, 0.47, 0, 1, 8));
+    v.add(box(0.5, 0.34, 0.32, 0x4a5a64, 0, 1.08, 0));
+    v.add(box(0.5, 0.03, 0.32, 0xd9822b, 0, 1.26, 0));
+    const screenTex = canvasTexture(256, 160, (g) => {
+      g.fillStyle = '#05090c';
+      g.fillRect(0, 0, 256, 160);
+      g.strokeStyle = '#3cff8a';
+      g.lineWidth = 3;
+      g.beginPath();
+      for (let x = 0; x < 256; x += 4) {
+        const y = 52 + Math.sin(x / 22) * 24 * (x % 128 < 70 ? 1 : 0.15);
+        x === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+      }
+      g.stroke();
+      g.fillStyle = '#9fe9ff';
+      g.font = '700 17px system-ui, sans-serif';
+      g.fillText('VT 450   RR 14', 14, 108);
+      g.fillText('PEEP 5   FiO2 40%', 14, 134);
+    });
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.25), new THREE.MeshBasicMaterial({ map: screenTex }));
+    screen.position.set(0, 1.08, 0.162);
+    screen.userData.ignoreRay = true;
+    v.add(screen);
+    const outlet = new THREE.Object3D();
+    outlet.position.set(0.2, 0.96, 0.17);
+    v.add(outlet);
+    const ventSign = sprite('Ventilator', 'جهاز التنفس الصناعي', '#4a5a64', 0.62);
+    ventSign.position.set(0, 1.55, 0);
+    v.add(ventSign);
+    cards.push({ sprite: ventSign, x: v.position.x, z: v.position.z });
+    group.add(v, blobShadow(0.8, 0.8, -1.05, -2.62));
+    colliders.push(rectAround(-1.05, -2.62, 0.3, 0.22));
+    ventilator = { outlet };
+  }
+  if (session.fixtures().some((i) => /suction/i.test(i.en))) {
+    const suction = new THREE.Group();
+    suction.position.set(1.35, 0, ROOM.minZ);
+    suction.add(box(0.2, 0.32, 0.1, 0xcfd8dc, 0, 1.3, 0.06));
+    suction.add(cyl(0.025, 0.025, 0.05, 0x607d8b, 0.04, 1.5, 0.08, 1, 10));
+    const canister = cyl(0.07, 0.07, 0.22, 0xdff3f7, -0.02, 1.0, 0.1, 0.55, 14);
+    suction.add(canister);
+    const suctionSign = sprite('Wall suction', 'شفط الحائط', '#607d8b', 0.5);
+    suctionSign.position.set(0, 1.75, 0.12);
+    suction.add(suctionSign);
+    cards.push({ sprite: suctionSign, x: 1.35, z: ROOM.minZ + 0.5 });
+    group.add(suction);
+  }
+
+  // ---- hand-hygiene station: a stand, a big blue sign and a mark on the floor, visible from the start ----
+  const station = new THREE.Group();
+  station.name = 'hygiene-station';
+  station.position.set(HYGIENE_STATION.x, 0, HYGIENE_STATION.z);
+  station.add(cyl(0.24, 0.26, 0.04, 0x90a4ae, 0, 0.02, 0, 1, 20));
+  station.add(cyl(0.03, 0.03, 1.0, 0x90a4ae, 0, 0.52, 0, 1, 8));
+  const dispenser = cloneModel('sanitizer');
+  let highlightable: THREE.Object3D;
+  if (dispenser) {
+    dispenser.scale.setScalar(1.7);
+    dispenser.position.set(0, 1.12, 0.0);
+    dispenser.rotation.y = Math.PI; // models face -z
+    station.add(dispenser);
+    highlightable = dispenser;
+  } else {
+    const fallback = new THREE.Group();
+    fallback.add(box(0.14, 0.26, 0.1, 0xffffff, 0, 1.12, 0), box(0.04, 0.04, 0.06, 0x2b8cc4, 0, 1.28, 0.06));
+    station.add(fallback);
+    highlightable = fallback;
+  }
+  const setStationHighlight = makeHighlightable(highlightable);
+  const hygieneSign = sprite('Hand Hygiene', 'نظافة اليدين', '#2b8cc4', 1.15);
+  hygieneSign.position.set(0, 1.75, 0);
+  station.add(hygieneSign);
+  const mark = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.95, 40), new THREE.MeshBasicMaterial({ color: 0x2b8cc4, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.y = 0.012;
+  mark.userData.ignoreRay = true;
+  station.add(mark);
+  const stationHit = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.8), new THREE.MeshBasicMaterial({ visible: false }));
+  stationHit.position.y = 0.9;
+  station.add(stationHit);
+  group.add(station);
+  colliders.push(rectAround(HYGIENE_STATION.x, HYGIENE_STATION.z, 0.26, 0.26));
+
+  // ---- beacon ----
+  const beacon = new THREE.Group();
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.8, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x22d3c5, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }));
+  pillar.position.y = 1.4;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.5, 32), new THREE.MeshBasicMaterial({ color: 0x22d3c5, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  for (const m of [pillar, ring]) m.userData.ignoreRay = true;
+  beacon.add(pillar, ring);
+  beacon.visible = false;
+  group.add(beacon);
+
   return {
     group,
     items,
     colliders,
     bedControl: control,
+    tables: tableInfo,
+    rects,
+    ventilator,
+    station: { root: station, setHighlight: setStationHighlight },
+    setBeacon: (p) => {
+      beacon.visible = p !== null;
+      if (p) beacon.position.set(p.x, 0, p.z);
+    },
     setBedControlHighlight: (on) => buttonMat.emissive.setHex(on ? 0x2dd4bf : 0x000000),
     updateLabels: (x, z) => {
       for (const c of cards) c.sprite.visible = Math.hypot(c.x - x, c.z - z) < LABEL_RANGE;

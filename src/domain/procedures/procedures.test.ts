@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { allItems, getProcedure, PROCEDURES, stepKind } from './catalog';
 import { blockMessage, coachAnswer } from './coach';
+import { currentObjective, type TableInfo } from './guide';
+import { HYGIENE_STATION, BED_CONTROL, whereAmI } from './layoutPoints';
 import { ProcedureSession, type Context } from './ProcedureSession';
 
 const AT_BED: Context = { nearBed: true, nearSanitizer: false, headAngleRad: (30 * Math.PI) / 180 };
@@ -51,6 +53,26 @@ describe('catalog (from the course sheets)', () => {
   });
 });
 
+describe('bedside fixtures', () => {
+  it('wall oxygen, the ventilator, the monitor and suction are at the bedside, not on the tables', () => {
+    const s = newSession('mv');
+    const names = s.fixtures().map((i) => i.en);
+    expect(names).toEqual(expect.arrayContaining(['Mechanical Ventilator', 'Oxygen Flowmeter', 'Suction Apparatus']));
+    expect(s.tableItems().every((i) => !names.includes(i.en))).toBe(true);
+    expect(s.required.length + s.fixtures().length).toBe(23);
+  });
+  it('a fixture cannot be picked up, and is not missing', () => {
+    const s = newSession('mv');
+    const vent = s.fixtures().find((i) => i.en === 'Mechanical Ventilator')!;
+    expect(s.pick(vent.id).ok).toBe(false);
+    expect(s.missing().some((i) => i.id === vent.id)).toBe(false);
+  });
+  it('ACLS finds its crash cart, monitor and wall suction already in the room', () => {
+    const s = newSession('acls');
+    expect(s.fixtures().map((i) => i.en)).toEqual(expect.arrayContaining(['Emergency Crash Cart', 'Cardiac Monitor / Defibrillator']));
+  });
+});
+
 describe('ordering', () => {
   it('only the next step can be done in an ordered procedure', () => {
     const s = newSession('mv');
@@ -86,7 +108,7 @@ describe('places and things', () => {
     s.perform('s0', AT_SANITIZER);
     const blocked = s.perform('s1', AT_BED);
     expect(blocked).toMatchObject({ ok: false, reason: 'equipment' });
-    expect(blocked.ok === false && blocked.missing!.length).toBe(23);
+    expect(blocked.ok === false && blocked.missing!.length).toBe(17); // 23 items, 6 are already at the bedside
     fillTray(s);
     expect(s.perform('s1', AT_BED).ok).toBe(true);
   });
@@ -209,5 +231,57 @@ describe('coach', () => {
     const r = s.perform('s4', AT_BED);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(blockMessage(state(s), r)).toContain('step is 1');
+  });
+});
+
+describe('guide (where to go and what to do)', () => {
+  const tablesOf = (s: ProcedureSession): TableInfo[] =>
+    s.def.groups.map((g, i) => ({ x: 4, z: i * 2, number: i + 1, group: i, en: g.en, ar: g.ar, itemIds: g.items.map((x) => x.id) }));
+  const guide = (s: ProcedureSession, player = { x: 0, z: 9 }, headDeg = 0) => currentObjective({ session: s, player, tables: tablesOf(s), headDeg });
+
+  it('starts with washing hands at the station', () => {
+    const s = newSession('mv');
+    const far = guide(s, { x: 0, z: 9 });
+    expect(far).toMatchObject({ kind: 'sanitizer', arrived: false, target: HYGIENE_STATION });
+    expect(far.en).toContain('hand-hygiene station');
+    expect(guide(s, { x: HYGIENE_STATION.x, z: HYGIENE_STATION.z + 1 })).toMatchObject({ kind: 'sanitizer', arrived: true });
+  });
+  it('then sends the nurse to the nearest table that still has what is missing', () => {
+    const s = newSession('mv');
+    s.perform('s0', AT_SANITIZER);
+    const g = guide(s);
+    expect(g.kind).toBe('tables');
+    expect(g.en).toMatch(/table \d/i);
+    // collect everything from the first table: the guide moves on to a table that still has items
+    const first = tablesOf(s)[0];
+    first.itemIds.forEach((id) => s.pick(id));
+    expect(guide(s, { x: first.x, z: first.z }).en).not.toContain(`table ${first.number} (`);
+  });
+  it('says what to do once the equipment is complete, then goes to the bed control for the position step', () => {
+    const s = newSession('mv');
+    s.perform('s0', AT_SANITIZER);
+    fillTray(s);
+    expect(guide(s).en).toContain('you have everything');
+    s.perform('s1', AT_BED);
+    const g = guide(s, { x: 3, z: 3 }, 0);
+    expect(g).toMatchObject({ kind: 'bed-control', target: BED_CONTROL, arrived: false });
+    expect(guide(s, { x: 1.4, z: -1.1 }, 0).en).toContain('now 0°');
+    expect(guide(s, { x: 3, z: 3 }, 30).kind).toBe('bedside');
+  });
+  it('never sends the nurse somewhere the rules refuse: the objective matches what check() allows', () => {
+    const s = newSession('mv');
+    for (const step of s.def.steps) {
+      fillTray(s);
+      const g = guide(s, step.kind === 'hygiene' ? HYGIENE_STATION : { x: 1.1, z: -1.4 }, 30);
+      expect(g.step?.index, `step ${step.n}`).toBe(step.index);
+      expect(s.perform(`s${step.index}`, ctxFor(step.kind)).ok).toBe(true);
+    }
+    expect(guide(s).kind).toBe('finish');
+  });
+  it('knows when the nurse is near the bed or a sanitizer', () => {
+    expect(whereAmI({ x: 1.1, z: -1.4 }).nearBed).toBe(true);
+    expect(whereAmI({ x: 4, z: 3 }).nearBed).toBe(false);
+    expect(whereAmI({ x: HYGIENE_STATION.x, z: HYGIENE_STATION.z + 1.5 }).nearSanitizer).toBe(true);
+    expect(whereAmI({ x: 0, z: 8 }).nearSanitizer).toBe(false);
   });
 });
