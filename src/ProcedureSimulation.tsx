@@ -204,6 +204,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       sim.registerExtra(item.root, { id: `item:${item.id}`, labelKey: '', label: item.label }, item.setHighlight);
     }
     sim.registerExtra(area.bedControl, { id: 'bed-control', labelKey: '', label: 'Bed control · مفتاح السرير' }, area.setBedControlHighlight);
+    sim.addUpdater(area.updateLabels);
     sim.setHeadTarget(0);
     simRef.current = sim;
     sim.start();

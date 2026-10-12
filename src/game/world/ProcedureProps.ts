@@ -19,6 +19,8 @@ export interface SupplyArea {
   colliders: Rect[];
   bedControl: THREE.Object3D;
   setBedControlHighlight(on: boolean): void;
+  /** Item name cards only show when the nurse is close: less to draw, and no wall of text from afar. */
+  updateLabels(x: number, z: number): void;
 }
 
 const PALETTE = [0x3b82a0, 0xd9822b, 0x4f9d69, 0x8e6bbf, 0xc44d58, 0x2a9d8f, 0xb08d57, 0x5c7aea];
@@ -26,6 +28,7 @@ const SPACING = 0.46; // between items on a table (a label is 0.44 m wide)
 const GAP = 0.85; // free floor between two tables: room to walk through
 const TABLE_DEPTH = 0.8;
 const TABLE_TOP = 0.78;
+const LABEL_RANGE = 4.6; // metres
 
 /** Label card with the English name above the Arabic one. */
 function labelTexture(en: string, ar: string, accent: string): THREE.CanvasTexture {
@@ -116,6 +119,7 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
   const group = new THREE.Group();
   const colliders: Rect[] = [];
   const items: PropItem[] = [];
+  const cards: { sprite: THREE.Sprite; x: number; z: number }[] = [];
 
   const byGroup = new Map<number, SceneItem[]>();
   for (const it of session.items) byGroup.set(it.group, [...(byGroup.get(it.group) ?? []), it]);
@@ -180,6 +184,7 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
       card.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), 0);
       root.add(card);
       group.add(root);
+      cards.push({ sprite: card, x: root.position.x, z: root.position.z });
 
       const mats: THREE.MeshLambertMaterial[] = [];
       shape.traverse((o) => {
@@ -220,5 +225,8 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
     colliders,
     bedControl: control,
     setBedControlHighlight: (on) => buttonMat.emissive.setHex(on ? 0x2dd4bf : 0x000000),
+    updateLabels: (x, z) => {
+      for (const c of cards) c.sprite.visible = Math.hypot(c.x - x, c.z - z) < LABEL_RANGE;
+    },
   };
 }

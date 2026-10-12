@@ -47,6 +47,8 @@ export class Simulator {
   private running = false;
   private headAngle = 0;
   private headOverride: number | null = null;
+  private updaters: ((x: number, z: number) => void)[] = [];
+  private updaterClock = 0;
   private basePixelRatio = 1;
   private quality = 1;
   private perfTime = 0;
@@ -173,6 +175,11 @@ export class Simulator {
     this.world.colliders.push(...colliders);
   }
 
+  /** Run something a few times a second with the player's position (cheap level-of-detail work). */
+  addUpdater(fn: (x: number, z: number) => void): void {
+    this.updaters.push(fn);
+  }
+
   registerExtra(root: THREE.Object3D, info: InteractableInfo, setHighlight?: (on: boolean) => void): void {
     this.interaction.register(root, info, setHighlight);
   }
@@ -254,6 +261,11 @@ export class Simulator {
     const raw = this.clock.getDelta();
     const dt = Math.min(raw, 0.05);
     this.governResolution(raw);
+    this.updaterClock += raw;
+    if (this.updaterClock > 0.12 && this.updaters.length) {
+      this.updaterClock = 0;
+      for (const fn of this.updaters) fn(this.camera.position.x, this.camera.position.z);
+    }
     const time = this.clock.elapsedTime;
     const simDt = this.running ? dt : 0;
 
