@@ -1,4 +1,5 @@
-export type ProcedureId = 'mv' | 'trach' | 'acls' | 'tpn' | 'art' | 'pa' | 'vap' | 'cauti' | 'clabsi';
+/** Only MV Care for now. Add the next procedure's id here when it is brought back from docs/future-procedures.json. */
+export type ProcedureId = 'mv';
 
 /**
  * What the nurse has to do for a step in the 3D room:
@@ -42,7 +43,7 @@ export interface ProcedureDef {
   id: ProcedureId;
   titleEn: string;
   titleAr: string;
-  /** false for the bundles: a set of care elements that can be done in any order */
+  /** false for a set of care elements that can be done in any order (none right now) */
   ordered: boolean;
   steps: ProcStep[];
   groups: EquipGroup[];

@@ -6,7 +6,7 @@ import type { Interventions } from '../domain/physiology/interventions';
 import { AudioEngine } from './audio/AudioEngine';
 import { FirstPersonController } from './controls/FirstPersonController';
 import { InteractionSystem, type InteractableInfo } from './interaction/InteractionSystem';
-import { BED_POS, INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS, type Rect } from './layout';
+import { BED_POS, INTERACT_DISTANCE, MONITOR_POS, OXYGEN_POS, PATIENT_REACH, type Rect } from './layout';
 import { buildClinicalScene, type ClinicalScene } from './world/ClinicalScene';
 import { disposeScene } from './world/helpers';
 
@@ -21,8 +21,10 @@ export interface AlarmState {
 
 export interface SimulatorCallbacks {
   onTargetChange(target: InteractableInfo | null): void;
-  /** E pressed (or the touch button). `target` is what the player is looking at (null if nothing). */
+  /** E pressed (or the touch button, or a tap on the object). `target` is what the player is looking at (null if nothing). */
   onInteract(target: InteractableInfo | null): void;
+  /** The player tried to use something that is in view but too far away. */
+  onTooFar?(target: InteractableInfo): void;
   onLockChange(locked: boolean): void;
   /** Called every frame with the simulated seconds that passed (0 while paused). */
   onTick(simDt: number): void;
@@ -106,8 +108,8 @@ export class Simulator {
     for (const root of this.world.curtains.pickRoots) {
       this.interaction.register(root, { id: 'curtain', labelKey: 'obj.curtain' }, (on) => this.world.curtains.setHighlight(on));
     }
-    this.interaction.register(this.world.patient.group, { id: 'patient', labelKey: 'obj.patient' });
-    this.interaction.register(this.world.bed.group, { id: 'patient', labelKey: 'obj.patient' });
+    this.interaction.register(this.world.patient.group, { id: 'patient', labelKey: 'obj.patient' }, undefined, PATIENT_REACH);
+    this.interaction.register(this.world.bed.group, { id: 'patient', labelKey: 'obj.patient' }, undefined, PATIENT_REACH);
 
     this.world.monitor.display.onBeat = () => {
       if (this.running) this.audio.beep(this.patient.getVitals().spo2, this.distanceGain(MONITOR_POS, 6));
@@ -158,7 +160,27 @@ export class Simulator {
 
   /** Same as pressing E. */
   interact(): void {
-    if (this.controller.locked) this.callbacks.onInteract(this.interaction.target);
+    if (!this.controller.locked) return;
+    this.use(this.interaction.target);
+  }
+
+  /** Touch: a tap on the 3D view uses what is under the finger. Returns true when the tap landed on something usable. */
+  tapAt(clientX: number, clientY: number): boolean {
+    if (!this.controller.locked) return false;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    const nx = ((clientX - r.left) / r.width) * 2 - 1;
+    const ny = -(((clientY - r.top) / r.height) * 2 - 1);
+    this.camera.updateMatrixWorld();
+    const hit = this.interaction.at(nx, ny);
+    if (!hit) return false;
+    this.use(hit);
+    return true;
+  }
+
+  private use(target: InteractableInfo | null): void {
+    if (target?.far) this.callbacks.onTooFar?.(target);
+    else this.callbacks.onInteract(target);
   }
 
   /** Browsers only allow audio after a user gesture: call this from the Start/Resume click. */
@@ -404,7 +426,7 @@ export class Simulator {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.callbacks.onInteract(this.interaction.target);
+    if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.use(this.interaction.target);
   };
 
   private resize(): void {

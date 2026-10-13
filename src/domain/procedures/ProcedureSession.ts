@@ -1,4 +1,5 @@
-import { allItems, isBedsideFixture, PROCEDURES } from './catalog';
+import { allItems, isBedsideFixture } from './catalog';
+import { DISTRACTOR_ITEMS, DISTRACTOR_STEPS } from './distractors';
 import type { EquipItem, Mode, ProcedureDef, ProcStep } from './types';
 
 /** An item laid out on the supply tables. `extra` ones are not needed (exam distractors). */
@@ -109,23 +110,15 @@ export class ProcedureSession {
 
     if (mode === 'exam') {
       const have = new Set(required.map((i) => norm(i.en)));
-      const pool = PROCEDURES.filter((p) => p.id !== def.id).flatMap((p) => allItems(p));
-      const seen = new Set<string>();
-      const distractors = shuffle(pool, rnd).filter((i) => {
-        const k = norm(i.en);
-        if (have.has(k) || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-      const extras = distractors.slice(0, 6).map((i): SceneItem => ({ ...i, id: `x-${i.id}`, group: Math.floor(rnd() * Math.max(1, def.groups.length)), extra: true, fixture: false }));
+      const distractors = shuffle(DISTRACTOR_ITEMS, rnd).filter((i) => !have.has(norm(i.en)));
+      const extras = distractors
+        .slice(0, 6)
+        .map((i, n): SceneItem => ({ ...i, id: `x-${def.id}-${n}`, group: Math.floor(rnd() * Math.max(1, def.groups.length)), device: false, extra: true, fixture: false }));
       this.items = [...required, ...extras];
 
       const stepKeys = new Set(def.steps.map((s) => norm(s.en)));
-      const foreign = shuffle(
-        PROCEDURES.filter((p) => p.id !== def.id).flatMap((p) => p.steps.map((s) => ({ p, s }))),
-        rnd,
-      ).filter(({ s }) => !stepKeys.has(norm(s.en)));
-      const fake: ActionRef[] = foreign.slice(0, 3).map(({ p, s }) => ({ key: `x-${p.id}-${s.index}`, stepIndex: null, en: s.en, ar: s.ar }));
+      const foreign = shuffle(DISTRACTOR_STEPS, rnd).filter((s) => !stepKeys.has(norm(s.en)));
+      const fake: ActionRef[] = foreign.slice(0, 3).map((s, n) => ({ key: `x-${def.id}-${n}`, stepIndex: null, en: s.en, ar: s.ar }));
       this.actions = shuffle([...stepActions, ...fake], rnd);
       this.limitSec = def.steps.length * 50 + 120;
     } else {

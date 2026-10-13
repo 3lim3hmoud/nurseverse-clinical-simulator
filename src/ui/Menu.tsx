@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FEATURES } from '../config';
 import { allItems, PROCEDURES } from '../domain/procedures/catalog';
 import type { Mode, ProcedureId } from '../domain/procedures/types';
 import { SCENARIOS, type ScenarioId } from '../domain/scenarios';
@@ -21,35 +22,39 @@ export default function Menu({ onPick, onPickProcedure }: Props) {
           <LangSwitch />
         </div>
 
-        <h2>{t('menu.proc.title')}</h2>
-        <p>{t('menu.proc.sub')}</p>
-        <div className="modes" role="tablist">
-          {(['practice', 'exam'] as const).map((m) => (
-            <button key={m} type="button" role="tab" aria-selected={mode === m} className={`mode${mode === m ? ' mode--on' : ''}`} onClick={() => setMode(m)}>
-              {t(`menu.mode.${m}`)}
+        {PROCEDURES.map((p) => (
+          <section key={p.id} className="hero">
+            <small className="hero__kicker">{t('menu.proc.title')}</small>
+            <h2>{lang === 'ar' ? p.titleAr : p.titleEn}</h2>
+            <p className="hero__meta">{t('proc.meta', { steps: p.steps.length, items: allItems(p).length })}</p>
+            <div className="modes" role="tablist">
+              {(['practice', 'exam'] as const).map((m) => (
+                <button key={m} type="button" role="tab" aria-selected={mode === m} className={`mode${mode === m ? ' mode--on' : ''}`} onClick={() => setMode(m)}>
+                  {t(`menu.mode.${m}`)}
+                </button>
+              ))}
+            </div>
+            <p className="menu__hint">{t(`menu.mode.${mode}.hint`)}</p>
+            <button type="button" className="overlay__start" onClick={() => onPickProcedure(p.id, mode)}>
+              {t('menu.start')}
             </button>
-          ))}
-        </div>
-        <p className="menu__hint">{t(`menu.mode.${mode}.hint`)}</p>
-        <div className="cases cases--grid">
-          {PROCEDURES.map((p) => (
-            <button key={p.id} type="button" className="case" onClick={() => onPickProcedure(p.id, mode)}>
-              <strong>{lang === 'ar' ? p.titleAr : p.titleEn}</strong>
-              <span>{t('proc.meta', { steps: p.steps.length, items: allItems(p).length })}{!p.ordered ? ` · ${t('proc.anyOrder')}` : ''}</span>
-            </button>
-          ))}
-        </div>
+          </section>
+        ))}
 
-        <h2 className="menu__sep">{t('menu.cases.title')}</h2>
-        <p>{t('menu.subtitle')}</p>
-        <div className="cases">
-          {Object.values(SCENARIOS).map((sc) => (
-            <button key={sc.id} type="button" className="case" onClick={() => onPick(sc.id)}>
-              <strong>{t(sc.titleKey)}</strong>
-              <span>{t(sc.blurbKey)}</span>
-            </button>
-          ))}
-        </div>
+        {FEATURES.clinicalCases && (
+          <>
+            <h2 className="menu__sep">{t('menu.cases.title')}</h2>
+            <p>{t('menu.subtitle')}</p>
+            <div className="cases">
+              {Object.values(SCENARIOS).map((sc) => (
+                <button key={sc.id} type="button" className="case" onClick={() => onPick(sc.id)}>
+                  <strong>{t(sc.titleKey)}</strong>
+                  <span>{t(sc.blurbKey)}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
