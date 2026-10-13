@@ -2,6 +2,8 @@
 
 Lightweight browser-based 3D nursing simulator (React + TypeScript + Three.js + Vite).
 
+**Current focus (MVP): MV Care procedure practice and exam.** The plan and the parked procedures are in `docs/ROADMAP.md`.
+
 ## Run
 
 ```bash
@@ -11,7 +13,8 @@ npm run build    # production build in dist/
 npm run preview
 ```
 
-Controls: **WASD** move · **Mouse** look · **Shift** walk faster · **E** interact · **M** sound · **Esc** pause.
+Controls: **WASD** move · **Mouse** look · **Shift** walk faster · **E** interact · **Q / R / F / T** Steps / Tray / Map / Coach (or Chat in the cases) · **B** hide the side panel · **M** sound · **Esc** pause.
+On a phone: left stick to move, drag to look, tap an object or press the **E** button; the side panel has all the lists.
 
 ## Cases
 

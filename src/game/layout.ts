@@ -24,4 +24,7 @@ export const IV_POS = new THREE.Vector3(-1.65, 0, -1.3);
 export const OXYGEN_POS = new THREE.Vector3(-1.65, 0, -2.4);
 
 export const PLAYER_START = new THREE.Vector3(0, 1.65, 3.4);
-export const INTERACT_DISTANCE = 2.6;
+/** How close (metres from the eye to what is aimed at) the nurse must be to use things. */
+export const INTERACT_DISTANCE = 3.0;
+/** The patient and the bed can be used from the foot of the bed, which is the natural place to stand. */
+export const PATIENT_REACH = 3.8;

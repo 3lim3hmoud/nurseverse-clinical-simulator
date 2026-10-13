@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { BED_CENTER, BED_CONTROL, HYGIENE_STATION, type Point } from '../domain/procedures/layoutPoints';
+import { BED_CONTROL, HYGIENE_STATION, type Point } from '../domain/procedures/layoutPoints';
 import { ROOM } from '../game/layout';
 import { useI18n } from '../i18n';
 
@@ -8,20 +8,22 @@ interface Props {
   player: { x: number; z: number; yaw: number };
   /** where the guide points (practice only) */
   target: Point | null;
+  /** drawing width in CSS pixels (the canvas scales down to fit its column) */
+  width?: number;
 }
 
-const W = 150;
-const H = Math.round((W * (ROOM.maxZ - ROOM.minZ)) / (ROOM.maxX - ROOM.minX)); // keeps the room's shape
-
 /** Floor plan, north (the headwall) at the top. Shows the bed, the hygiene station, the tables, you and the target. */
-export default function MiniMap({ rects, player, target }: Props) {
+export default function MiniMap({ rects, player, target, width = 240 }: Props) {
   const { t } = useI18n();
   const ref = useRef<HTMLCanvasElement>(null);
+  const W = width;
+  const H = Math.round((W * (ROOM.maxZ - ROOM.minZ)) / (ROOM.maxX - ROOM.minX)); // keeps the room's shape
 
   useEffect(() => {
     const canvas = ref.current;
     const g = canvas?.getContext('2d');
     if (!canvas || !g) return;
+    const k = W / 150;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
@@ -35,7 +37,8 @@ export default function MiniMap({ rects, player, target }: Props) {
     g.fillRect(0, 0, W, H);
     // the bay with the curtains
     g.strokeStyle = '#7fb5b0';
-    g.setLineDash([3, 2]);
+    g.lineWidth = k;
+    g.setLineDash([3 * k, 2 * k]);
     g.strokeRect(px(-2.7), pz(-3), px(2.7) - px(-2.7), pz(0.7) - pz(-3));
     g.setLineDash([]);
     // bed
@@ -43,31 +46,30 @@ export default function MiniMap({ rects, player, target }: Props) {
     g.fillRect(px(-0.5), pz(-2.45), px(0.5) - px(-0.5), pz(-0.35) - pz(-2.45));
     g.fillStyle = '#37b36f';
     g.beginPath();
-    g.arc(px(BED_CONTROL.x), pz(BED_CONTROL.z), 2.5, 0, Math.PI * 2);
+    g.arc(px(BED_CONTROL.x), pz(BED_CONTROL.z), 2.5 * k, 0, Math.PI * 2);
     g.fill();
     // tables
-    g.font = '700 9px system-ui, sans-serif';
+    g.font = `700 ${Math.round(9 * k)}px system-ui, sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     for (const r of rects) {
       g.fillStyle = '#d9822b';
-      g.fillRect(px(r.cx - r.w / 2), pz(r.cz - r.d / 2), Math.max(5, r.w * sx), Math.max(5, r.d * sx));
+      g.fillRect(px(r.cx - r.w / 2), pz(r.cz - r.d / 2), Math.max(5 * k, r.w * sx), Math.max(5 * k, r.d * sx));
       g.fillStyle = '#fff';
       g.fillText(String(r.number), px(r.cx), pz(r.cz));
     }
     // hand-hygiene station
     g.fillStyle = '#2b8cc4';
     g.beginPath();
-    g.arc(px(HYGIENE_STATION.x), pz(HYGIENE_STATION.z), 4, 0, Math.PI * 2);
+    g.arc(px(HYGIENE_STATION.x), pz(HYGIENE_STATION.z), 4 * k, 0, Math.PI * 2);
     g.fill();
     // target
     if (target) {
       g.strokeStyle = '#0fb5a8';
-      g.lineWidth = 2;
+      g.lineWidth = 2 * k;
       g.beginPath();
-      g.arc(px(target.x), pz(target.z), 7, 0, Math.PI * 2);
+      g.arc(px(target.x), pz(target.z), 7 * k, 0, Math.PI * 2);
       g.stroke();
-      g.lineWidth = 1;
     }
     // you: a triangle pointing the way you face (yaw 0 = toward -z = up)
     g.save();
@@ -75,14 +77,13 @@ export default function MiniMap({ rects, player, target }: Props) {
     g.rotate(-player.yaw);
     g.fillStyle = '#c0392b';
     g.beginPath();
-    g.moveTo(0, -6);
-    g.lineTo(4.5, 5);
-    g.lineTo(-4.5, 5);
+    g.moveTo(0, -6 * k);
+    g.lineTo(4.5 * k, 5 * k);
+    g.lineTo(-4.5 * k, 5 * k);
     g.closePath();
     g.fill();
     g.restore();
-    void BED_CENTER;
-  }, [rects, player.x, player.z, player.yaw, target]);
+  }, [rects, player.x, player.z, player.yaw, target, W, H]);
 
-  return <canvas ref={ref} className="minimap" width={W} height={H} style={{ width: W, height: H }} aria-label={t('map.title')} />;
+  return <canvas ref={ref} className="minimap" width={W} height={H} style={{ aspectRatio: `${W} / ${H}` }} aria-label={t('map.title')} />;
 }

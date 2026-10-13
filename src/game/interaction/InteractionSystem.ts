@@ -5,34 +5,68 @@ export interface InteractableInfo {
   labelKey: string; // i18n key
   /** Ready-made text (already translated) that is shown instead of the key. */
   label?: string;
+  /** Set by the system: the object is in the line of sight but too far to use. */
+  far?: boolean;
 }
 
 interface Entry {
   root: THREE.Object3D;
   info: InteractableInfo;
+  /** how close the nurse must be (metres, measured from the eye to the surface that is aimed at) */
+  reach: number;
   setHighlight?: (on: boolean) => void;
 }
+
+interface Pick {
+  entry: Entry;
+  distance: number;
+  near: boolean;
+}
+
+/**
+ * Aim assist: besides the exact centre of the screen, a few rays around it are tried, so a phone thumb or a shaky
+ * mouse still lands on the patient. Offsets are in normalised screen units (-1..1); the centre ray always wins.
+ */
+const RING: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [0.06, 0],
+  [-0.06, 0],
+  [0, 0.09],
+  [0, -0.09],
+  [0.13, 0.04],
+  [-0.13, 0.04],
+  [0.13, -0.09],
+  [-0.13, -0.09],
+];
+
+/** The cheaper subset used every frame while looking around (taps use the full ring). */
+const RING_LIVE = RING.slice(0, 5);
+
+/** How much farther than `reach` we still look, so the HUD can say "move closer" instead of showing nothing. */
+const FAR_FACTOR = 2.2;
 
 /** Looks at the centre of the screen and finds the interactable object (if any) within reach. */
 export class InteractionSystem {
   target: InteractableInfo | null = null;
   private entries: Entry[] = [];
   private current: Entry | null = null;
+  private currentFar = false;
   private raycaster = new THREE.Raycaster();
-  private center = new THREE.Vector2(0, 0);
+  private point = new THREE.Vector2();
   private sinceCheck = 0;
+  private lastPos = new THREE.Vector3(NaN, 0, 0);
+  private lastQuat = new THREE.Quaternion();
 
   constructor(
     private camera: THREE.Camera,
     private scene: THREE.Scene,
-    maxDistance: number,
+    private maxDistance: number,
     private onTargetChange: (t: InteractableInfo | null) => void,
-  ) {
-    this.raycaster.far = maxDistance;
-  }
+  ) {}
 
-  register(root: THREE.Object3D, info: InteractableInfo, setHighlight?: (on: boolean) => void): void {
-    this.entries.push({ root, info, setHighlight });
+  /** `reach` overrides the default distance (the patient is something you should be able to use from the foot of the bed). */
+  register(root: THREE.Object3D, info: InteractableInfo, setHighlight?: (on: boolean) => void, reach?: number): void {
+    this.entries.push({ root, info, setHighlight, reach: reach ?? this.maxDistance });
   }
 
   /** Change the text shown for something that is already registered (the procedure screen reuses the patient). */
@@ -45,35 +79,71 @@ export class InteractionSystem {
     if (!entry) return;
     if (entry === this.current) this.clear();
     this.entries = this.entries.filter((e) => e !== entry);
+    this.lastPos.x = NaN;
   }
 
-  /** Raycasts ~20 times per second; objects in front (walls, bed...) block the ray. */
-  update(dt: number): void {
-    this.sinceCheck += dt;
-    if (this.sinceCheck < 0.05) return;
-    this.sinceCheck = 0;
-
-    this.raycaster.setFromCamera(this.center, this.camera);
+  /** The first thing a ray hits that is an interactable (a wall or the bed in front blocks it). */
+  private cast(nx: number, ny: number): { entry: Entry; distance: number } | null {
+    this.point.set(nx, ny);
+    this.raycaster.setFromCamera(this.point, this.camera);
+    this.raycaster.far = this.maxDistance * FAR_FACTOR + 2;
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
-    let found: Entry | null = null;
     for (const hit of hits) {
       if (hit.object.userData.ignoreRay) continue;
-      found = this.entries.find((e) => this.isInside(hit.object, e.root)) ?? null;
-      break;
+      const entry = this.entries.find((e) => this.isInside(hit.object, e.root));
+      return entry ? { entry, distance: hit.distance } : null;
     }
+    return null;
+  }
 
-    if (found === this.current) return;
+  /** Best interactable around a screen point: the nearest ray to the point that lands on something usable. */
+  private pick(cx: number, cy: number, scale = 1, ring: ReadonlyArray<readonly [number, number]> = RING): Pick | null {
+    let far: Pick | null = null;
+    for (const [ox, oy] of ring) {
+      const hit = this.cast(cx + ox * scale, cy + oy * scale);
+      if (!hit) continue;
+      if (hit.distance <= hit.entry.reach) return { ...hit, near: true };
+      if (!far && hit.distance <= hit.entry.reach * FAR_FACTOR) far = { ...hit, near: false };
+    }
+    return far;
+  }
+
+  /** ~10 times per second, and only when the view has moved; objects in front (walls, bed...) block the ray. */
+  update(dt: number): void {
+    this.sinceCheck += dt;
+    if (this.sinceCheck < 0.1) return;
+    this.sinceCheck = 0;
+
+    // nothing in the room moves by itself, so an unchanged view has an unchanged answer
+    if (this.camera.position.equals(this.lastPos) && this.camera.quaternion.equals(this.lastQuat)) return;
+    this.lastPos.copy(this.camera.position);
+    this.lastQuat.copy(this.camera.quaternion);
+
+    const found = this.pick(0, 0, 1, RING_LIVE);
+    const entry = found?.entry ?? null;
+    const far = found ? !found.near : false;
+    if (entry === this.current && far === this.currentFar) return;
+
     this.current?.setHighlight?.(false);
-    found?.setHighlight?.(true);
-    this.current = found;
-    this.target = found?.info ?? null;
+    if (entry && !far) entry.setHighlight?.(true);
+    this.current = entry;
+    this.currentFar = far;
+    this.target = entry ? { ...entry.info, far } : null;
     this.onTargetChange(this.target);
   }
 
+  /** What is under a screen point (a tap on a phone). Looks a little wider than the crosshair: fingers are not exact. */
+  at(ndcX: number, ndcY: number): InteractableInfo | null {
+    const found = this.pick(ndcX, ndcY, 1.4);
+    return found ? { ...found.entry.info, far: !found.near } : null;
+  }
+
   clear(): void {
+    this.lastPos.x = NaN; // look again at the next update
     this.current?.setHighlight?.(false);
     if (this.current) this.onTargetChange(null);
     this.current = null;
+    this.currentFar = false;
     this.target = null;
   }
 

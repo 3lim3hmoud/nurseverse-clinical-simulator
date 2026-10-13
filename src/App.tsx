@@ -12,6 +12,7 @@ import { Simulator, type AlarmState, type InteractableInfo } from './game/Simula
 import { getLang, hasKey, t, useLang } from './i18n';
 import { doctorChat, doctorService, patientConversation, SMALL_TALK, type ChatTurn } from './services/ai';
 import ChatPanel from './ui/ChatPanel';
+import Dashboard, { type DashTab } from './ui/Dashboard';
 import Hud from './ui/Hud';
 import IvPanel from './ui/IvPanel';
 import Menu from './ui/Menu';
@@ -27,6 +28,7 @@ import TouchControls from './ui/TouchControls';
 import VitalsPanel from './ui/VitalsPanel';
 
 type PanelId = 'vitals' | 'oxygen' | 'patient' | 'iv' | 'meds' | 'chat';
+type TabId = 'case' | 'chat';
 const PANEL_FOR: Record<string, PanelId> = { 'patient-monitor': 'vitals', 'oxygen-device': 'oxygen', patient: 'patient', 'iv-stand': 'iv', 'med-cart': 'meds' };
 
 /** Phones/tablets: no keyboard or pointer lock, so we show a joystick instead. */
@@ -82,7 +84,10 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   const [locked, setLocked] = useState(false);
   const [started, setStarted] = useState(false);
   const [target, setTarget] = useState<InteractableInfo | null>(null);
+  /** Desktop: non-null while the mouse is free to click in the dashboard. Phone: an object panel (monitor, oxygen...) is open. */
   const [panel, setPanel] = useState<PanelId | null>(null);
+  const [tab, setTab] = useState<TabId>('case');
+  const [dashOpen, setDashOpen] = useState(true);
   const [alarm, setAlarm] = useState<AlarmState>({ active: false, silenced: false, codes: [], message: '' });
   const [toast, setToast] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -107,10 +112,15 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
         const v = patient.getVitals();
         log.record('monitor-checked', { spo2: v.spo2, hr: v.heartRate, rr: v.respiratoryRate });
       }
+      setDashOpen(true);
+      if (id === 'chat') {
+        setTab('chat');
+        if (touch) return; // on a phone the chat is just a dashboard tab: the controls stay on
+      }
       simRef.current?.releaseCursor();
       setPanel(id);
     },
-    [log, patient],
+    [log, patient, touch],
   );
 
   const closePanel = useCallback(() => {
@@ -134,7 +144,12 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
             session.start();
           }
         },
+        onTooFar: (tgt) => showToast(t('hud.tooFar', { label: tgt.label ?? t(tgt.labelKey) })),
         onInteract: (tgt) => {
+          if (!tgt) {
+            showToast(t('hud.aimHint'));
+            return;
+          }
           if (tgt?.id === 'sanitizer') {
             log.record('hand-hygiene');
             showToast(t('toast.hygiene'));
@@ -212,6 +227,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
         e.preventDefault();
         openPanel('chat');
       }
+      if (e.code === 'KeyB' && !e.repeat && !isTextField(e.target) && started && !ended && !panel) setDashOpen((o) => !o);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -430,74 +446,132 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   };
 
   const showStart = (!locked && !panel && !ended) || error !== null;
+  const playing = !error && started && !ended;
+  const objectPanel = panel !== null && panel !== 'chat';
+
+  const tabs: DashTab[] = [
+    { id: 'case', icon: '📋', label: t('dash.case') },
+    { id: 'chat', icon: '💬', label: t('hud.chat') },
+  ];
+
+  const renderObjectPanel = () => {
+    switch (panel) {
+      case 'vitals':
+        return <VitalsPanel patient={patient} alarm={alarm} touch={touch} onSilence={silenceAlarm} onClose={closePanel} />;
+      case 'oxygen':
+        return <OxygenPanel current={patient.getInterventions().oxygen} touch={touch} onApply={applyOxygen} onRemove={removeOxygen} onClose={closePanel} />;
+      case 'iv':
+        return <IvPanel patient={patient} touch={touch} onStart={startIv} onStop={stopIv} onNewBag={newBag} onClose={closePanel} />;
+      case 'meds':
+        return (
+          <MedsPanel touch={touch} ordered={orders} given={given} glucoseHint={scenario.tools?.glucometer === true} onAsk={requestMed} onGive={giveMed} onClose={closePanel} />
+        );
+      case 'patient':
+        return (
+          <PatientPanel
+            patient={patient}
+            touch={touch}
+            hasGlucometer={scenario.tools?.glucometer === true}
+            actions={actions}
+            turns={turns}
+            onTurns={setTurns}
+            onTypingChange={setTyping}
+            onClose={closePanel}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="app" onContextMenu={(e) => e.preventDefault()}>
-      <div className="viewport" ref={viewportRef} />
+      <div className={`stage${touch ? ' stage--touch' : ''}`}>
+        <div className="viewport" ref={viewportRef} />
 
-      {!error && started && !ended && (
-        <Hud title={t(scenario.titleKey)} objective={session.objective} target={target} touch={touch} panelOpen={panel !== null} muted={muted} />
-      )}
+        {playing && (
+          <>
+            <Hud target={target} panelOpen={panel !== null} />
+            {toast && (
+              <div className="stage__notes">
+                <div className="toast" role="status">
+                  {toast}
+                </div>
+              </div>
+            )}
+            {!dashOpen && !touch && (
+              <button type="button" className="stage__dashbtn" onClick={() => setDashOpen(true)}>
+                ☰
+              </button>
+            )}
+          </>
+        )}
 
-      {!error && touch && locked && !panel && !ended && (
-        <TouchControls
-          canInteract={target !== null}
-          onMove={(x, y) => simRef.current?.setMoveInput(x, y)}
-          onLook={(dx, dy) => simRef.current?.look(dx, dy)}
-          onInteract={() => simRef.current?.interact()}
-          onPause={() => simRef.current?.stopTouch()}
-          onChat={() => openPanel('chat')}
-          muted={muted}
-          onToggleMute={toggleMute}
-        />
-      )}
+        {playing && touch && locked && !objectPanel && (
+          <TouchControls
+            canInteract={target !== null && !target.far}
+            onMove={(x, y) => simRef.current?.setMoveInput(x, y)}
+            onLook={(dx, dy) => simRef.current?.look(dx, dy)}
+            onTap={(x, y) => simRef.current?.tapAt(x, y)}
+            onInteract={() => simRef.current?.interact()}
+            onPause={() => simRef.current?.stopTouch()}
+            muted={muted}
+            onToggleMute={toggleMute}
+            dashOpen={dashOpen}
+            onToggleDash={() => setDashOpen((o) => !o)}
+          />
+        )}
+      </div>
 
-      {panel === 'vitals' && <VitalsPanel patient={patient} alarm={alarm} touch={touch} onSilence={silenceAlarm} onClose={closePanel} />}
-      {panel === 'oxygen' && (
-        <OxygenPanel current={patient.getInterventions().oxygen} touch={touch} onApply={applyOxygen} onRemove={removeOxygen} onClose={closePanel} />
-      )}
-      {panel === 'iv' && <IvPanel patient={patient} touch={touch} onStart={startIv} onStop={stopIv} onNewBag={newBag} onClose={closePanel} />}
-      {panel === 'meds' && (
-        <MedsPanel
-          touch={touch}
-          ordered={orders}
-          given={given}
-          glucoseHint={scenario.tools?.glucometer === true}
-          onAsk={requestMed}
-          onGive={giveMed}
-          onClose={closePanel}
-        />
-      )}
-      {panel === 'chat' && (
-        <ChatPanel
-          touch={touch}
-          patientTurns={turns}
-          doctorTurns={doctorTurns}
-          onPatientTurns={setTurns}
-          onDoctorTurns={setDoctorTurns}
-          askPatient={actions.askPatient}
-          askDoctor={askDoctorChat}
-          onTypingChange={setTyping}
-          onClose={closePanel}
-        />
-      )}
-      {panel === 'patient' && (
-        <PatientPanel
-          patient={patient}
-          touch={touch}
-          hasGlucometer={scenario.tools?.glucometer === true}
-          actions={actions}
-          turns={turns}
-          onTurns={setTurns}
-          onTypingChange={setTyping}
-          onClose={closePanel}
-        />
-      )}
-
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
-        </div>
+      {playing && dashOpen && (
+        <Dashboard
+          title={t(scenario.titleKey)}
+          objective={
+            <div className="objective objective--plain">
+              <div className="objective__txt">
+                <small>{t('guide.now')}</small>
+                <b>{session.objective}</b>
+              </div>
+            </div>
+          }
+          tabs={objectPanel ? undefined : tabs}
+          active={tab}
+          onTab={(id) => {
+            setTab(id as TabId);
+            if (!touch && panel) setPanel(id === 'chat' ? 'chat' : null);
+          }}
+          focused={panel !== null}
+          hint={touch ? undefined : t(panel ? 'dash.hint.focus' : 'dash.hint.case')}
+          onCollapse={() => setDashOpen(false)}
+        >
+          {objectPanel ? (
+            renderObjectPanel()
+          ) : tab === 'chat' ? (
+            <ChatPanel
+              patientTurns={turns}
+              doctorTurns={doctorTurns}
+              onPatientTurns={setTurns}
+              onDoctorTurns={setDoctorTurns}
+              askPatient={actions.askPatient}
+              askDoctor={askDoctorChat}
+              onTypingChange={setTyping}
+            />
+          ) : (
+            <div className="casetab">
+              <p>{t(scenario.introKey)}</p>
+              <ul className="casetab__tips">
+                <li>🩺 {t('dash.case.tip1')}</li>
+                <li>🖥 {t('dash.case.tip2')}</li>
+                <li>💬 {t('dash.case.tip3')}</li>
+              </ul>
+              <div className="dash__actions">
+                <button type="button" className="btn" onClick={() => session.finish()}>
+                  {t('start.finish')}
+                </button>
+              </div>
+            </div>
+          )}
+        </Dashboard>
       )}
 
       {showStart && (

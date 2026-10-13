@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { blockMessage, introMessage, stepDoneMessage } from './domain/procedures/coach';
+import { shortTitle } from './domain/procedures/format';
 import { currentObjective, type TableInfo } from './domain/procedures/guide';
 import { HYGIENE_STATION, whereAmI } from './domain/procedures/layoutPoints';
 import { effectOf } from './domain/procedures/stepEffects';
@@ -12,16 +13,17 @@ import { buildSupplyArea, type PropItem, type SupplyArea } from './game/world/Pr
 import { useI18n } from './i18n';
 import { askCoach } from './services/ai/procedureCoachService';
 import type { ChatTurn } from './services/ai';
+import Dashboard, { type DashTab } from './ui/Dashboard';
+import Hud from './ui/Hud';
 import HowToCard from './ui/HowToCard';
 import MiniMap from './ui/MiniMap';
 import PatientChat from './ui/PatientChat';
-import { StepsPanel, TrayPanel } from './ui/ProcedurePanels';
+import { StepsTab, TrayTab } from './ui/ProcedurePanels';
 import ProcedureResults from './ui/ProcedureResults';
-import Sheet from './ui/Sheet';
 import StartOverlay from './ui/StartOverlay';
 import TouchControls from './ui/TouchControls';
 
-type PanelId = 'steps' | 'tray' | 'coach';
+type TabId = 'steps' | 'map' | 'tray' | 'coach';
 
 const BED_ANGLES_DEG = [0, 15, 30, 45, 60];
 const ACTION_SECONDS = 2.2;
@@ -62,7 +64,11 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   const [locked, setLocked] = useState(false);
   const [started, setStarted] = useState(false);
   const [target, setTarget] = useState<InteractableInfo | null>(null);
-  const [panel, setPanel] = useState<PanelId | null>(null);
+  /** The dashboard tab on show. */
+  const [tab, setTab] = useState<TabId>('steps');
+  /** Desktop only: non-null while the mouse is free to click inside the dashboard (the room is paused for the mouse). */
+  const [panel, setPanel] = useState<TabId | null>(null);
+  const [dashOpen, setDashOpen] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<SessionResult | null>(null);
@@ -88,14 +94,28 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
 
   const coachSays = useCallback((text: string) => setTurns((prev) => [...prev, { from: 'coach', text }]), []);
 
-  const openPanel = useCallback((id: PanelId) => {
-    simRef.current?.releaseCursor();
-    setPanel(id);
-  }, []);
+  /** Show a dashboard tab. On a computer this also frees the mouse so the tab can be used (E or Esc goes back to the room). */
+  const openPanel = useCallback(
+    (id: TabId) => {
+      setTab(id);
+      setDashOpen(true);
+      if (touch) return;
+      simRef.current?.releaseCursor();
+      setPanel(id);
+    },
+    [touch],
+  );
   const closePanel = useCallback(() => {
     setPanel(null);
     if (!touch) simRef.current?.lock();
   }, [touch]);
+  const selectTab = useCallback(
+    (id: TabId) => {
+      setTab(id);
+      if (!touch && panel) setPanel(id);
+    },
+    [touch, panel],
+  );
 
   const finishRun = useCallback(
     (timedOut = false) => {
@@ -179,7 +199,10 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   // What happens when E is pressed on something (kept in a ref so the simulator always calls the latest version)
   const interactRef = useRef<(tgt: InteractableInfo | null) => void>(() => undefined);
   interactRef.current = (tgt) => {
-    if (!tgt) return;
+    if (!tgt) {
+      showToast(t('hud.aimHint'));
+      return;
+    }
     if (tgt.id.startsWith('item:')) {
       const id = tgt.id.slice(5);
       const prop = itemsRef.current.get(id);
@@ -201,9 +224,14 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       const closed = simRef.current?.toggleCurtains();
       showToast(t(closed ? 'toast.curtainClosed' : 'toast.curtainOpened'));
     } else if (tgt.id === 'patient') {
-      openPanel('steps');
+      // Practice: E on the patient does the bedside step that is due. Otherwise (exam, or not a bedside step) open the steps.
+      const next = session.nextStep();
+      if (practice && next?.kind === 'bedside' && !busy) doAction(`s${next.index}`);
+      else openPanel('steps');
     }
   };
+  const tooFarRef = useRef<(tgt: InteractableInfo) => void>(() => undefined);
+  tooFarRef.current = (tgt) => showToast(t('hud.tooFar', { label: (tgt.label ?? t(tgt.labelKey)).split(' · ')[lang === 'ar' ? 1 : 0] ?? '' }));
 
   // ---- 3D simulator lifecycle ----
   useEffect(() => {
@@ -218,6 +246,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
           if (isLocked) setStarted(true);
         },
         onInteract: (tgt) => interactRef.current(tgt),
+        onTooFar: (tgt) => tooFarRef.current(tgt),
         onTick: () => undefined,
         onAlarmChange: () => undefined,
       });
@@ -243,7 +272,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
         return p.x === nx && p.z === nz && p.yaw === ny ? p : { x: nx, z: nz, yaw: ny };
       }),
     );
-    sim.relabel('patient', 'Patient · open the steps list · افتح قائمة الخطوات');
+    sim.relabel('patient', 'Patient · المريض');
     sim.setAlarmSound(false); // the alarm light shows on the monitor; a siren would only get in the way of practising
     if (area.ventilator) {
       const outlet = area.ventilator.outlet;
@@ -302,7 +331,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
     });
   }, []);
 
-  // keys: Q steps, R tray, T coach, M sound, E / Esc closes a panel
+  // keys: Q steps, R tray, F map, T coach, B show/hide the dashboard, M sound, E / Esc go back to the room
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTextField(e.target) && e.code !== 'Escape') return;
@@ -315,7 +344,9 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       if (!started || result || panel || e.repeat) return;
       if (e.code === 'KeyQ') openPanel('steps');
       else if (e.code === 'KeyR') openPanel('tray');
+      else if (e.code === 'KeyF') openPanel('map');
       else if (e.code === 'KeyT' && practice) openPanel('coach');
+      else if (e.code === 'KeyB') setDashOpen((o) => !o);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -365,100 +396,115 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   };
 
   const title = lang === 'ar' ? def.titleAr : def.titleEn;
-  const nextStep = session.nextStep();
   const left = session.timeLeft();
   const busyStep = busy ? session.actions.find((a) => a.key === busy) : null;
   const busyDetail = busyStep && practice && busyStep.stepIndex !== null ? def.steps[busyStep.stepIndex] : null;
   const showStart = (!locked && !panel && !result) || error !== null;
+  const playing = !error && started && !result;
+  const total = def.steps.length;
+  const numbers = Object.fromEntries((layout?.tables ?? []).map((tb) => [tb.group, tb.number]));
+
+  const tabs: DashTab[] = [
+    { id: 'steps', icon: '☰', label: t('proc.steps'), badge: `${session.doneCount}/${total}` },
+    { id: 'map', icon: '🗺', label: t('map.title') },
+    { id: 'tray', icon: '🧰', label: t('proc.tray'), badge: practice ? `${session.required.length - session.missing().length}/${session.required.length}` : `${session.trayItems().length}` },
+    ...(practice ? [{ id: 'coach', icon: '💬', label: t('proc.coach') }] : []),
+  ];
+
+  const objectiveCard = objective && (
+    <div className={`objective${objective.arrived ? ' objective--arrived' : ''}`}>
+      <div className="objective__arrow" style={arrow && !objective.arrived ? { transform: `rotate(${arrow.rel}rad)` } : undefined} aria-hidden="true">
+        {objective.arrived || !arrow ? '✓' : '↑'}
+      </div>
+      <div className="objective__txt">
+        <small>
+          {t('guide.now')}
+          {arrow && !objective.arrived ? ` · ${t('guide.distance', { m: arrow.meters })}` : ''}
+        </small>
+        <b>{lang === 'ar' ? objective.ar : objective.en}</b>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="app" dir={dir} onContextMenu={(e) => e.preventDefault()}>
-      <div className="viewport" ref={viewportRef} />
+    <div className="app" onContextMenu={(e) => e.preventDefault()}>
+      <div className={`stage${touch ? ' stage--touch' : ''}`}>
+        <div className="viewport" ref={viewportRef} />
 
-      {!error && started && !result && (
-        <>
-          <div className="proc-hud">
-            <div className="proc-hud__row">
-              <strong>{title}</strong>
-              <span className={`badge badge--${mode}`}>{t(`menu.mode.${mode}`)}</span>
-            </div>
-            <div className="proc-hud__row">
-              <span>{t('proc.done', { n: session.doneCount, total: def.steps.length })}</span>
-              {left !== null && <span className={`timer${left < 60 ? ' timer--low' : ''}`}>{t('proc.timeLeft')}: {mmss(left)}</span>}
-            </div>
-            {objective && (
-              <div className={`objective${objective.arrived ? ' objective--arrived' : ''}`}>
-                <div className="objective__arrow" style={arrow && !objective.arrived ? { transform: `rotate(${arrow.rel}rad)` } : undefined} aria-hidden="true">
-                  {objective.arrived || !arrow ? '✓' : '↑'}
+        {playing && (
+          <>
+            <Hud target={target} panelOpen={panel !== null} quiet={busy !== null} />
+            <div className="stage__notes" dir={dir} aria-live="polite">
+              {busy && (
+                <div className="proc-busy" role="status">
+                  <b>{busyDetail ? shortTitle(lang === 'ar' ? busyDetail.ar : busyDetail.en, 80) : t('proc.doing')}</b>
+                  {busyDetail && lang === 'ar' && <small>{busyDetail.doing}</small>}
+                  <div className="proc-bar"><i style={{ animationDuration: `${actionSeconds()}s` }} /></div>
                 </div>
-                <div className="objective__txt">
-                  <small>
-                    {t('guide.now')}
-                    {arrow && !objective.arrived ? ` · ${t('guide.distance', { m: arrow.meters })}` : ''}
-                  </small>
-                  <b>{lang === 'ar' ? objective.ar : objective.en}</b>
+              )}
+              {toast && (
+                <div className="toast" role="status">
+                  {toast}
                 </div>
-              </div>
+              )}
+            </div>
+            {!dashOpen && !touch && (
+              <button type="button" className="stage__dashbtn" onClick={() => setDashOpen(true)}>
+                ☰ {session.doneCount}/{total}
+              </button>
             )}
-            {!touch && <small>{t(`proc.keys.${mode}`)}</small>}
-          </div>
-          {layout && <MiniMap rects={layout.rects} player={pose} target={beaconAt} />}
-          {!panel && <div className={`crosshair${target ? ' crosshair--active' : ''}`} aria-hidden="true" />}
-          {target && !panel && !busy && (
-            <div className="hud__prompt">
-              <kbd>E</kbd> {target.label ?? t(target.labelKey)}
-            </div>
-          )}
-          {busy && (
-            <div className="proc-busy" role="status">
-              <b>{busyDetail ? (lang === 'ar' ? busyDetail.ar : busyDetail.en) : t('proc.doing')}</b>
-              {busyDetail && lang === 'ar' && <small>{busyDetail.doing}</small>}
-              <div className="proc-bar"><i style={{ animationDuration: `${actionSeconds()}s` }} /></div>
-            </div>
-          )}
-        </>
-      )}
+          </>
+        )}
 
-      {!error && touch && locked && !panel && !result && (
-        <>
+        {playing && touch && locked && (
           <TouchControls
-            canInteract={target !== null}
+            canInteract={target !== null && !target.far}
             onMove={(x, y) => simRef.current?.setMoveInput(x, y)}
             onLook={(dx, dy) => simRef.current?.look(dx, dy)}
+            onTap={(x, y) => simRef.current?.tapAt(x, y)}
             onInteract={() => simRef.current?.interact()}
             onPause={() => simRef.current?.stopTouch()}
-            onChat={() => openPanel(practice ? 'coach' : 'steps')}
             muted={muted}
             onToggleMute={toggleMute}
+            dashOpen={dashOpen}
+            onToggleDash={() => setDashOpen((o) => !o)}
           />
-          <div className="proc-touchbtns">
-            <button type="button" onClick={() => openPanel('steps')}>☰ {t('proc.steps')}</button>
-            <button type="button" onClick={() => openPanel('tray')}>🧰 {t('proc.tray')}</button>
-            <button type="button" onClick={() => setHowto(true)} aria-label={t('howto.open')}>❓</button>
-          </div>
-        </>
-      )}
+        )}
 
-      {panel === 'steps' && <StepsPanel session={session} touch={touch} busy={busy !== null} hint={objective ? (lang === 'ar' ? objective.ar : objective.en) : undefined} onClose={closePanel} onDo={doAction} onFinish={confirmFinish} />}
-      {panel === 'tray' && <TrayPanel session={session} touch={touch} numbers={Object.fromEntries((layout?.tables ?? []).map((tb) => [tb.group, tb.number]))} onClose={closePanel} />}
-      {panel === 'coach' && practice && (
-        <Sheet title={t('pcoach.title')} subtitle={t('pcoach.sub')} touch={touch} onClose={closePanel}>
-          <PatientChat
-            peer="coach"
-            turns={turns}
-            onTurns={setTurns}
-            ask={async (q, h) => ({ text: await askCoach(coachState(), q, h) })}
-            onTypingChange={setTyping}
-          />
-        </Sheet>
-      )}
+        {howto && playing && <HowToCard touch={touch} mode={mode} onClose={closeHowTo} />}
+      </div>
 
-      {howto && started && !result && <HowToCard touch={touch} mode={mode} onClose={closeHowTo} />}
-
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
-        </div>
+      {playing && dashOpen && (
+        <Dashboard
+          title={title}
+          tag={{ text: t(`menu.mode.${mode}`), tone: mode }}
+          progress={{ value: total === 0 ? 0 : session.doneCount / total, text: t('proc.done', { n: session.doneCount, total }) }}
+          timer={left !== null ? { text: mmss(left), low: left < 60 } : undefined}
+          objective={objectiveCard}
+          tabs={tabs}
+          active={tab}
+          onTab={(id) => selectTab(id as TabId)}
+          focused={panel !== null}
+          hint={touch ? undefined : t(panel ? 'dash.hint.focus' : `dash.hint.${mode}`)}
+          onCollapse={() => setDashOpen(false)}
+        >
+          {tab === 'steps' && <StepsTab session={session} busy={busy !== null} onDo={doAction} onFinish={confirmFinish} />}
+          {tab === 'map' && layout && (
+            <div className="mapwrap">
+              <MiniMap rects={layout.rects} player={pose} target={beaconAt} />
+              <ul className="legend">
+                <li><i className="dot dot--you" /> {t('map.you')}</li>
+                <li><i className="dot dot--table" /> {t('map.tables')}</li>
+                <li><i className="dot dot--sink" /> {t('map.sanitizer')}</li>
+                <li><i className="dot dot--bed" /> {t('map.bedControl')}</li>
+              </ul>
+            </div>
+          )}
+          {tab === 'tray' && <TrayTab session={session} numbers={numbers} />}
+          {tab === 'coach' && practice && (
+            <PatientChat peer="coach" turns={turns} onTurns={setTurns} ask={async (q, h) => ({ text: await askCoach(coachState(), q, h) })} onTypingChange={setTyping} />
+          )}
+        </Dashboard>
       )}
 
       {showStart && (

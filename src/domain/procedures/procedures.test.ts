@@ -25,10 +25,8 @@ function completeAll(s: ProcedureSession) {
 }
 
 describe('catalog (from the course sheets)', () => {
-  it('has the nine procedures with the expected number of steps', () => {
-    expect(PROCEDURES.map((p) => [p.id, p.steps.length])).toEqual([
-      ['mv', 13], ['trach', 10], ['acls', 18], ['tpn', 10], ['art', 10], ['pa', 13], ['vap', 9], ['cauti', 9], ['clabsi', 12],
-    ]);
+  it('has MV Care (13 steps) for now; the others are parked for later', () => {
+    expect(PROCEDURES.map((p) => [p.id, p.steps.length])).toEqual([['mv', 13]]);
   });
   it('every step has English, Arabic, a "what am I doing" and a rationale in both languages', () => {
     for (const p of PROCEDURES) for (const s of p.steps) for (const f of [s.en, s.ar, s.doing, s.whyEn, s.whyAr]) expect(f.length, `${p.id} step ${s.n}`).toBeGreaterThan(3);
@@ -40,9 +38,8 @@ describe('catalog (from the course sheets)', () => {
       expect(ids.length).toBeGreaterThan(0);
     }
   });
-  it('only the bundles are unordered, and only they use app-made equipment', () => {
-    expect(PROCEDURES.filter((p) => !p.ordered).map((p) => p.id)).toEqual(['vap', 'cauti', 'clabsi']);
-    expect(PROCEDURES.filter((p) => p.equipmentFromApp).map((p) => p.id)).toEqual(['vap', 'cauti', 'clabsi']);
+  it('MV Care is an ordered procedure with the equipment from the course sheet', () => {
+    expect(PROCEDURES.every((p) => p.ordered && !p.equipmentFromApp)).toBe(true);
   });
   it('recognises the kind of the steps that need a place or a thing', () => {
     expect(stepKind('Perform Hand Hygiene & Wear PPE (gloves, mask, goggles)')).toBe('hygiene');
@@ -67,10 +64,6 @@ describe('bedside fixtures', () => {
     expect(s.pick(vent.id).ok).toBe(false);
     expect(s.missing().some((i) => i.id === vent.id)).toBe(false);
   });
-  it('ACLS finds its crash cart, monitor and wall suction already in the room', () => {
-    const s = newSession('acls');
-    expect(s.fixtures().map((i) => i.en)).toEqual(expect.arrayContaining(['Emergency Crash Cart', 'Cardiac Monitor / Defibrillator']));
-  });
 });
 
 describe('ordering', () => {
@@ -82,18 +75,11 @@ describe('ordering', () => {
     expect(s.doneCount).toBe(0);
     expect(s.errors).toHaveLength(1);
   });
-  it('a bundle can be done in any order', () => {
-    const s = newSession('vap');
-    fillTray(s);
-    expect(s.perform('s5', AT_BED).ok).toBe(true);
-    expect(s.perform('s0', AT_BED).ok).toBe(true);
-    expect(s.errors).toHaveLength(0);
-  });
   it('a step cannot be done twice', () => {
-    const s = newSession('vap');
+    const s = newSession('mv');
     fillTray(s);
-    s.perform('s0', AT_BED);
-    expect(s.perform('s0', AT_BED)).toMatchObject({ ok: false, reason: 'done' });
+    s.perform('s0', AT_SANITIZER);
+    expect(s.perform('s0', AT_SANITIZER)).toMatchObject({ ok: false, reason: 'done' });
   });
 });
 
@@ -122,19 +108,17 @@ describe('places and things', () => {
     expect(s.perform('s2', { ...AT_BED, headAngleRad: 0.6 }).ok).toBe(true);
   });
   it('bedside steps need the patient close', () => {
-    const s = newSession('art');
+    const s = newSession('mv');
     fillTray(s);
-    expect(s.perform('s0', { ...AT_BED, nearBed: false })).toMatchObject({ ok: false, reason: 'bed' });
+    s.perform('s0', AT_SANITIZER);
+    s.perform('s1', AT_BED);
+    s.perform('s2', AT_BED);
+    expect(s.perform('s3', { ...AT_BED, nearBed: false })).toMatchObject({ ok: false, reason: 'bed' });
   });
-  it('bedside work is blocked until the tray is full where the procedure has no gather step', () => {
-    const s = newSession('trach');
+  it('bedside work is blocked until the tray is full', () => {
+    const s = newSession('mv');
     s.perform('s0', AT_SANITIZER);
     expect(s.perform('s1', AT_BED)).toMatchObject({ ok: false, reason: 'equipment' });
-  });
-  it('ACLS does not wait for the equipment: compressions start at once', () => {
-    const s = newSession('acls');
-    expect(s.perform('s0', AT_BED).ok).toBe(true);
-    expect(s.perform('s1', AT_BED).ok).toBe(true);
   });
 });
 
