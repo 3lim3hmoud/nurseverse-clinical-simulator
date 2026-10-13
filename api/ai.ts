@@ -80,7 +80,7 @@ function toMessages(history: Turn[], question: string) {
 }
 
 /** One text-generation call, on whichever provider is configured. Returns the model's text. */
-async function generate(job: 'patient' | 'debrief', system: string, messages: { role: 'user' | 'assistant'; content: string }[], maxTokens: number): Promise<string> {
+async function generate(job: 'patient' | 'debrief', system: string, messages: { role: 'user' | 'assistant'; content: string }[], maxTokens: number, json = false): Promise<string> {
   const which = provider();
   if (!which) throw new HttpError(500, 'AI is not configured on the server');
   const model = modelFor(job);
@@ -95,7 +95,7 @@ async function generate(job: 'patient' | 'debrief', system: string, messages: { 
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-          generationConfig: { maxOutputTokens: maxTokens, temperature: job === 'patient' ? 0.7 : 0.4 },
+          generationConfig: { maxOutputTokens: maxTokens, temperature: job === 'patient' ? 0.7 : 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) },
         }),
         signal: ctrl.signal,
       });
@@ -255,10 +255,15 @@ async function debrief(b: Record<string, unknown>) {
     'At most 4 strengths and 4 improvements, each under 220 characters. nextStep is one actionable sentence.',
   ].join('\n');
   const content = JSON.stringify({ scenario: str(b.scenarioId, 20), score: Number(b.score) || 0, items, events, progress });
-  const raw = await generate('debrief', system, [{ role: 'user', content }], 1500);
+  const raw = await generate('debrief', system, [{ role: 'user', content }], 1500, true);
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) throw new HttpError(502, 'bad debrief format');
-  const parsed = JSON.parse(m[0]) as { strengths?: unknown; improvements?: unknown; nextStep?: unknown };
+  let parsed: { strengths?: unknown; improvements?: unknown; nextStep?: unknown };
+  try {
+    parsed = JSON.parse(m[0]);
+  } catch {
+    throw new HttpError(502, 'bad debrief format');
+  }
   const strengths = strList(parsed.strengths, 4, 260);
   const improvements = strList(parsed.improvements, 4, 260);
   const nextStep = str(parsed.nextStep, 300);
