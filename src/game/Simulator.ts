@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Hands } from './hands/Hands';
 import { HandWashRun, type WashProgress } from './hands/HandWashRun';
 import type { HandWashSink } from './world/HandWashSink';
+import { accelerateRaycast } from './world/accelerate';
 import { ALERT_TEXT_EN, criticalAlerts, type AlertCode } from '../domain/patient/alarms';
 import type { PatientModel } from '../domain/patient/PatientModel';
 import { BAG_ML } from '../domain/physiology/fluids';
@@ -38,6 +39,9 @@ const HEAD_RAISED = 1.0; // radians (~57°), high Fowler's
 const LEGS_RAISED = 0.5; // radians (~29°)
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+/** Lowest render scale the resolution governor will use. */
+const MIN_QUALITY = 0.65;
+
 /** Owns the Three.js renderer, the render loop, the player and the audio. React only talks to this class. */
 export class Simulator {
   private renderer: THREE.WebGLRenderer;
@@ -65,6 +69,11 @@ export class Simulator {
   private quality = 1;
   private perfTime = 0;
   private perfFrames = 0;
+  private fpsBeforeDrop: number | null = null;
+  private qualityBeforeDrop = 1;
+  private holdUntil = 0;
+  private hold = 6;
+  private cpuBoundUntil = 0;
   private legAngle = 0;
   private lastVitals: ReturnType<PatientModel['getVitals']> | null = null;
   private lastInterventions: Interventions | null = null;
@@ -73,14 +82,17 @@ export class Simulator {
 
   constructor(private container: HTMLElement, private patient: PatientModel, private callbacks: SimulatorCallbacks, options: { glucometer?: boolean } = {}) {
     const dpr = window.devicePixelRatio || 1;
-    this.renderer = new THREE.WebGLRenderer({ antialias: dpr <= 1 });
+    // Smooth edges (MSAA is cheap on phone GPUs) and a sharp image; the resolution governor lowers the pixel count if a
+    // device cannot hold 60 fps, so strong devices stay crisp and weak ones stay fluid.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: false });
     const coarse = window.matchMedia('(pointer: coarse)').matches;
-    this.basePixelRatio = Math.min(dpr, coarse ? 1.25 : 1.5); // lighter on phones
+    this.basePixelRatio = Math.min(dpr, coarse ? 1.5 : 2);
     this.renderer.setPixelRatio(this.basePixelRatio);
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 30);
     this.world = buildClinicalScene(patient.profile, options);
+    accelerateRaycast(this.world.scene);
 
     this.controller = new FirstPersonController(this.camera, this.renderer.domElement, this.world.colliders, this.world.bounds, {
       onLockChange: (locked) => {
@@ -223,7 +235,7 @@ export class Simulator {
   /** Same as pressing E. */
   interact(): void {
     if (!this.controller.locked || this.wash?.active) return;
-    this.use(this.interaction.target);
+    this.use(this.interaction.refresh());
   }
 
   /** Touch: a tap on the 3D view uses what is under the finger. Returns true when the tap landed on something usable. */
@@ -259,6 +271,7 @@ export class Simulator {
   /** Add props (and their collision) to the room. */
   addExtras(group: THREE.Object3D, colliders: Rect[] = []): void {
     this.world.scene.add(group);
+    accelerateRaycast(group);
     this.world.colliders.push(...colliders);
   }
 
@@ -322,20 +335,43 @@ export class Simulator {
   }
 
   /**
-   * Keeps the frame rate smooth on weak GPUs by lowering the render resolution when it drops below ~40 fps
-   * for two seconds (down to 60%), and raising it again when there is room. Off in dev, so tests stay deterministic.
+   * Holds 60 fps by trading resolution for speed. Every 1.5 s it looks at the average frame rate: below ~52 fps the
+   * render resolution drops a step (down to 65%), and it climbs back when there is room. Two guards avoid the usual
+   * traps: after a drop it waits (longer each time) before trying a higher resolution again, and if a drop did not
+   * make the game faster the limit is the CPU, not the pixels, so the resolution goes back up instead of staying blurry.
+   * Off in dev, so tests stay deterministic.
    */
   private governResolution(rawDt: number): void {
     if (import.meta.env.DEV) return;
+    if (rawDt > 0.25) return; // tab was hidden or the game was paused: not a real frame time
+    if (this.clock.elapsedTime < 4) return; // warm-up: shaders compile and models upload
     this.perfTime += rawDt;
     this.perfFrames++;
-    if (this.perfTime < 2) return;
+    if (this.perfTime < 1.5) return;
     const fps = this.perfFrames / this.perfTime;
     this.perfTime = 0;
     this.perfFrames = 0;
+    const now = this.clock.elapsedTime;
     let next = this.quality;
-    if (fps < 40) next = Math.max(0.6, this.quality - 0.15);
-    else if (fps > 57) next = Math.min(1, this.quality + 0.1);
+
+    if (this.fpsBeforeDrop !== null) {
+      // the first window after a drop: did it help?
+      if (fps < this.fpsBeforeDrop + 4) {
+        next = this.qualityBeforeDrop;
+        this.cpuBoundUntil = now + 60;
+      }
+      this.fpsBeforeDrop = null;
+    } else if (fps < 52 && now >= this.cpuBoundUntil && this.quality > MIN_QUALITY) {
+      this.fpsBeforeDrop = fps;
+      this.qualityBeforeDrop = this.quality;
+      next = Math.max(MIN_QUALITY, this.quality - (fps < 35 ? 0.2 : 0.1));
+      this.holdUntil = now + this.hold;
+      this.hold = Math.min(30, this.hold * 2);
+    } else if (fps > 58 && now >= this.holdUntil && this.quality < 1) {
+      next = Math.min(1, this.quality + 0.1);
+      if (next === 1) this.hold = 6;
+    }
+
     if (next !== this.quality) {
       this.quality = next;
       this.renderer.setPixelRatio(this.basePixelRatio * next);
