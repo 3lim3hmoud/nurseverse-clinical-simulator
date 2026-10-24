@@ -9,6 +9,8 @@ import { ProcedureSession, type Check, type Context, type SessionResult } from '
 import type { Mode, ProcedureDef } from './domain/procedures/types';
 import { createStablePatient } from './domain/procedures/stablePatient';
 import { Simulator, type InteractableInfo } from './game/Simulator';
+import type { WashProgress } from './game/hands/HandWashRun';
+import HandWashCard from './ui/HandWashCard';
 import { buildSupplyArea, type PropItem, type SupplyArea } from './game/world/ProcedureProps';
 import { useI18n } from './i18n';
 import { askCoach } from './services/ai/procedureCoachService';
@@ -29,6 +31,8 @@ const BED_ANGLES_DEG = [0, 15, 30, 45, 60];
 const ACTION_SECONDS = 2.2;
 /** Dev-only shortcut so automated runs do not wait for the progress bar. */
 const actionSeconds = () => (import.meta.env.DEV && (window as unknown as { __quick?: boolean }).__quick ? 0.3 : ACTION_SECONDS);
+/** Dev-only: run the hand wash fast in automated tests. */
+const devQuickWash = () => import.meta.env.DEV && (window as unknown as { __quick?: boolean }).__quick === true;
 const isTextField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -56,6 +60,8 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   const toastTimer = useRef(0);
   const actionTimer = useRef(0);
   const bedIdx = useRef(0);
+  const washKey = useRef<string | null>(null);
+  const washFastRef = useRef(false);
 
   const touch = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
   const session = useMemo(() => new ProcedureSession(def, mode, undefined, Date.now() % 100000), [def, mode]);
@@ -81,6 +87,9 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   const [headDeg, setHeadDeg] = useState(0);
   const [howto, setHowto] = useState(false);
   const [muted, setMuted] = useState(false);
+  /** Set while the nurse is washing her hands at the sink (the WHO technique plays out step by step). */
+  const [wash, setWash] = useState<WashProgress | null>(null);
+  const [washFast, setWashFast] = useState(false);
   const areaRef = useRef<SupplyArea | null>(null);
 
   const practice = mode === 'practice';
@@ -150,6 +159,34 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
     [practice, coachState, showToast, coachSays, t],
   );
 
+  /** The step is over (the progress bar ran out, or the hand wash finished): do it for real and tell the nurse. */
+  const complete = useCallback(
+    (key: string) => {
+      const again = session.perform(key, context());
+      setBusy(null);
+      if (!again.ok) {
+        showToast(t('proc.moved'));
+        return;
+      }
+      const step = session.def.steps[session.performed[session.performed.length - 1].stepIndex];
+      const effect = effectOf(step);
+      if (effect) {
+        if (effect.delta) patient.addTransient(effect.delta, effect.rampSec ?? 3, effect.holdSec ?? 6, effect.decaySec ?? 10);
+        if (effect.sound) simRef.current?.patientSound(effect.sound);
+      }
+      if (practice) {
+        const text = stepDoneMessage(coachState(), step);
+        showToast(text.split('\n')[0]);
+        coachSays(text);
+      } else {
+        showToast(t('proc.stepDone', { n: session.doneCount }));
+      }
+      bump((n) => n + 1);
+      if (session.finished) window.setTimeout(() => finishRun(false), 900);
+    },
+    [session, context, showToast, t, patient, practice, coachState, coachSays, finishRun],
+  );
+
   const doAction = useCallback(
     (key: string) => {
       if (busy || result) return;
@@ -165,35 +202,27 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       setPanel(null);
       const stepNow = session.actions.find((a) => a.key === key);
       const kind = stepNow?.stepIndex != null ? session.def.steps[stepNow.stepIndex].kind : 'bedside';
-      if (kind === 'hygiene') simRef.current?.focusOn(HYGIENE_STATION.x, 1.15, HYGIENE_STATION.z, actionSeconds() + 0.4);
-      else if (kind === 'position') simRef.current?.focusOn(0, 0.9, -2.0, actionSeconds() + 0.4);
-      else if (kind === 'bedside') simRef.current?.focusOn(0, 0.95, -1.5, actionSeconds() + 0.4);
       if (!touch) simRef.current?.lock();
-      actionTimer.current = window.setTimeout(() => {
-        const again = session.perform(key, context());
-        setBusy(null);
-        if (!again.ok) {
-          showToast(t('proc.moved'));
-          return;
-        }
-        const step = session.def.steps[session.performed[session.performed.length - 1].stepIndex];
-        const effect = effectOf(step);
-        if (effect) {
-          if (effect.delta) patient.addTransient(effect.delta, effect.rampSec ?? 3, effect.holdSec ?? 6, effect.decaySec ?? 10);
-          if (effect.sound) simRef.current?.patientSound(effect.sound);
-        }
-        if (practice) {
-          const text = stepDoneMessage(coachState(), step);
-          showToast(text.split('\n')[0]);
-          coachSays(text);
-        } else {
-          showToast(t('proc.stepDone', { n: session.doneCount }));
-        }
-        bump((n) => n + 1);
-        if (session.finished) window.setTimeout(() => finishRun(false), 900);
-      }, actionSeconds() * 1000);
+      if (kind === 'hygiene') {
+        washKey.current = key;
+        const started = simRef.current?.startHandWash(
+          (p) => setWash(p),
+          () => {
+            washKey.current = null;
+            setWash(null);
+            setWashFast(false);
+            complete(key);
+          },
+          devQuickWash() ? 20 : washFastRef.current ? 3 : 1,
+        );
+        if (started) return;
+        washKey.current = null;
+        simRef.current?.focusOn(HYGIENE_STATION.x, 1.15, HYGIENE_STATION.z, actionSeconds() + 0.4);
+      } else if (kind === 'position') simRef.current?.focusOn(0, 0.9, -2.0, actionSeconds() + 0.4);
+      else if (kind === 'bedside') simRef.current?.focusOn(0, 0.95, -1.5, actionSeconds() + 0.4);
+      actionTimer.current = window.setTimeout(() => complete(key), actionSeconds() * 1000);
     },
-    [busy, result, context, session, explain, touch, practice, coachState, showToast, coachSays, finishRun, patient, t],
+    [busy, result, context, session, explain, touch, complete],
   );
 
   // What happens when E is pressed on something (kept in a ref so the simulator always calls the latest version)
@@ -244,6 +273,12 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
         onLockChange: (isLocked) => {
           setLocked(isLocked);
           if (isLocked) setStarted(true);
+          else if (washKey.current) {
+            // Esc during a hand wash: the wash is cancelled and the step does not count
+            washKey.current = null;
+            setWash(null);
+            setBusy(null);
+          }
         },
         onInteract: (tgt) => interactRef.current(tgt),
         onTooFar: (tgt) => tooFarRef.current(tgt),
@@ -261,7 +296,8 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       itemsRef.current.set(item.id, item);
       sim.registerExtra(item.root, { id: `item:${item.id}`, labelKey: '', label: item.label }, item.setHighlight);
     }
-    sim.registerExtra(area.station.root, { id: 'sanitizer', labelKey: '', label: 'Hand sanitizer · معقم اليدين' }, area.station.setHighlight);
+    sim.registerExtra(area.station.root, { id: 'sanitizer', labelKey: '', label: 'Hand-wash sink · حوض غسيل اليدين' }, area.station.setHighlight);
+    sim.setHandWashSink(area.station.sink, HYGIENE_STATION.x, HYGIENE_STATION.z);
     sim.registerExtra(area.bedControl, { id: 'bed-control', labelKey: '', label: 'Bed control · مفتاح السرير' }, area.setBedControlHighlight);
     sim.addUpdater(area.updateLabels);
     sim.addUpdater((x, z) =>
@@ -323,6 +359,20 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
     }, 500);
     return () => window.clearInterval(id);
   }, [started, result, mode, session, finishRun]);
+
+  // Practice: Space speeds the hand wash up (the animation still plays, three times faster)
+  useEffect(() => {
+    if (!wash || !practice) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      e.preventDefault();
+      washFastRef.current = !washFastRef.current;
+      setWashFast(washFastRef.current);
+      simRef.current?.setHandWashSpeed(washFastRef.current ? 3 : 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [wash, practice]);
 
   const toggleMute = useCallback(() => {
     setMuted((m) => {
@@ -433,7 +483,20 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
 
         {playing && (
           <>
-            <Hud target={target} panelOpen={panel !== null} quiet={busy !== null} />
+            <Hud target={target} panelOpen={panel !== null || wash !== null} quiet={busy !== null || wash !== null} />
+            {wash && (
+              <HandWashCard
+                progress={wash}
+                fast={washFast}
+                canSpeedUp={practice}
+                touch={touch}
+                onFaster={() => {
+                  washFastRef.current = !washFastRef.current;
+                  setWashFast(washFastRef.current);
+                  simRef.current?.setHandWashSpeed(washFastRef.current ? 3 : 1);
+                }}
+              />
+            )}
             <div className="stage__notes" dir={dir} aria-live="polite">
               {busy && (
                 <div className="proc-busy" role="status">

@@ -4,6 +4,7 @@ import type { TableInfo } from '../../domain/procedures/guide';
 import { BED_CONTROL, HYGIENE_STATION } from '../../domain/procedures/layoutPoints';
 import { rectAround, ROOM, type Rect } from '../layout';
 import { blobShadow, box, canvasTexture, cyl } from './helpers';
+import { buildHandWashSink, type HandWashSink } from './HandWashSink';
 import { cloneModel, makeHighlightable } from './models';
 
 export interface PropItem {
@@ -27,7 +28,7 @@ export interface SupplyArea {
   /** Floor-plan rectangles of the tables, for the minimap. */
   rects: { cx: number; cz: number; w: number; d: number; number: number }[];
   /** The hand-hygiene station (aim at it and press E). */
-  station: { root: THREE.Object3D; setHighlight(on: boolean): void };
+  station: { root: THREE.Object3D; setHighlight(on: boolean): void; sink: HandWashSink };
   /** The ventilator at the head of the bed, when this procedure has one. */
   ventilator: { outlet: THREE.Object3D } | null;
   /** A teal pillar of light on the place to go next (null hides it). */
@@ -292,40 +293,26 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
     group.add(suction);
   }
 
-  // ---- hand-hygiene station: a stand, a big blue sign and a mark on the floor, visible from the start ----
+  // ---- hand-wash station: a real sink with a tap, soap and paper towels, a big blue sign and a floor mark ----
   const station = new THREE.Group();
   station.name = 'hygiene-station';
   station.position.set(HYGIENE_STATION.x, 0, HYGIENE_STATION.z);
-  station.add(cyl(0.24, 0.26, 0.04, 0x90a4ae, 0, 0.02, 0, 1, 20));
-  station.add(cyl(0.03, 0.03, 1.0, 0x90a4ae, 0, 0.52, 0, 1, 8));
-  const dispenser = cloneModel('sanitizer');
-  let highlightable: THREE.Object3D;
-  if (dispenser) {
-    dispenser.scale.setScalar(1.7);
-    dispenser.position.set(0, 1.12, 0.0);
-    dispenser.rotation.y = Math.PI; // models face -z
-    station.add(dispenser);
-    highlightable = dispenser;
-  } else {
-    const fallback = new THREE.Group();
-    fallback.add(box(0.14, 0.26, 0.1, 0xffffff, 0, 1.12, 0), box(0.04, 0.04, 0.06, 0x2b8cc4, 0, 1.28, 0.06));
-    station.add(fallback);
-    highlightable = fallback;
-  }
-  const setStationHighlight = makeHighlightable(highlightable);
+  const sink = buildHandWashSink();
+  station.add(sink.group);
+  const setStationHighlight = makeHighlightable(sink.group);
   const hygieneSign = sprite('Hand Hygiene', 'نظافة اليدين', '#2b8cc4', 1.15);
-  hygieneSign.position.set(0, 1.75, 0);
+  hygieneSign.position.set(0, 1.78, -0.1);
   station.add(hygieneSign);
-  const mark = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.95, 40), new THREE.MeshBasicMaterial({ color: 0x2b8cc4, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+  const mark = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.56, 40), new THREE.MeshBasicMaterial({ color: 0x2b8cc4, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
   mark.rotation.x = -Math.PI / 2;
-  mark.position.y = 0.012;
+  mark.position.set(0, 0.012, sink.anchors.standZ);
   mark.userData.ignoreRay = true;
   station.add(mark);
-  const stationHit = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.8), new THREE.MeshBasicMaterial({ visible: false }));
-  stationHit.position.y = 0.9;
+  const stationHit = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.4, 0.7), new THREE.MeshBasicMaterial({ visible: false }));
+  stationHit.position.set(0, 0.7, 0);
   station.add(stationHit);
   group.add(station);
-  colliders.push(rectAround(HYGIENE_STATION.x, HYGIENE_STATION.z, 0.26, 0.26));
+  colliders.push({ minX: HYGIENE_STATION.x - 0.45, maxX: HYGIENE_STATION.x + 0.75, minZ: HYGIENE_STATION.z - 0.3, maxZ: HYGIENE_STATION.z + 0.28 });
 
   // ---- beacon ----
   const beacon = new THREE.Group();
@@ -347,7 +334,7 @@ export function buildSupplyArea(session: ProcedureSession): SupplyArea {
     tables: tableInfo,
     rects,
     ventilator,
-    station: { root: station, setHighlight: setStationHighlight },
+    station: { root: station, setHighlight: setStationHighlight, sink },
     setBeacon: (p) => {
       beacon.visible = p !== null;
       if (p) beacon.position.set(p.x, 0, p.z);

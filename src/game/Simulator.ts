@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { Hands } from './hands/Hands';
+import { HandWashRun, type WashProgress } from './hands/HandWashRun';
+import type { HandWashSink } from './world/HandWashSink';
 import { ALERT_TEXT_EN, criticalAlerts, type AlertCode } from '../domain/patient/alarms';
 import type { PatientModel } from '../domain/patient/PatientModel';
 import { BAG_ML } from '../domain/physiology/fluids';
@@ -45,6 +48,10 @@ export class Simulator {
   private audio = new AudioEngine();
   private clock = new THREE.Clock();
   private resizeObserver: ResizeObserver;
+  /** The nurse's own hands, drawn over the room while she does something with them. */
+  readonly hands = new Hands();
+  private wash: HandWashRun | null = null;
+  private sink: { unit: HandWashSink; x: number; z: number } | null = null;
 
   private running = false;
   private headAngle = 0;
@@ -77,7 +84,10 @@ export class Simulator {
 
     this.controller = new FirstPersonController(this.camera, this.renderer.domElement, this.world.colliders, this.world.bounds, {
       onLockChange: (locked) => {
-        if (!locked) this.interaction.clear();
+        if (!locked) {
+          this.interaction.clear();
+          this.cancelHandWash();
+        }
         callbacks.onLockChange(locked);
       },
     });
@@ -158,9 +168,61 @@ export class Simulator {
     this.controller.addLook(dx, dy);
   }
 
+  // ---- hand washing at the sink (procedure mode) ----
+
+  /** Tell the simulator where the hand-wash sink stands (room position of its origin). */
+  setHandWashSink(unit: HandWashSink, x: number, z: number): void {
+    this.sink = { unit, x, z };
+  }
+
+  /**
+   * Walk to the sink and wash the hands with the WHO technique. `onDone` is called when the wash is complete;
+   * a cancelled wash (Esc) never calls it. Returns false when the room has no sink.
+   */
+  startHandWash(onProgress: (p: WashProgress) => void, onDone: () => void, speed = 1): boolean {
+    if (!this.sink || this.wash?.active) return false;
+    const { unit, x, z } = this.sink;
+    const a = unit.anchors;
+    const at = (v: THREE.Vector3) => new THREE.Vector3(x + v.x, v.y, z + v.z);
+    this.wash = new HandWashRun(
+      {
+        hands: this.hands,
+        camera: this.camera,
+        driveTo: (px, pz, k) => this.controller.driveTo(px, pz, k),
+        lookAt: (lx, ly, lz, k) => this.controller.lookToward(lx, ly, lz, k),
+        distanceTo: (px, pz) => this.controller.distanceTo(px, pz),
+        setScripted: (on) => {
+          this.controller.scripted = on;
+        },
+        setWater: (on) => unit.setWater(on),
+        stand: new THREE.Vector3(x, 0, z + a.standZ),
+        basin: at(a.basin),
+        anchorsWorld: { tap: at(a.tap), soap: at(a.soap), towel: at(a.towel) },
+      },
+      onProgress,
+      onDone,
+    );
+    this.wash.speed = speed;
+    this.interaction.clear();
+    return true;
+  }
+
+  setHandWashSpeed(speed: number): void {
+    if (this.wash) this.wash.speed = speed;
+  }
+
+  cancelHandWash(): void {
+    this.wash?.cancel();
+    this.wash = null;
+  }
+
+  get washing(): boolean {
+    return this.wash?.active === true;
+  }
+
   /** Same as pressing E. */
   interact(): void {
-    if (!this.controller.locked) return;
+    if (!this.controller.locked || this.wash?.active) return;
     this.use(this.interaction.target);
   }
 
@@ -310,6 +372,7 @@ export class Simulator {
     window.removeEventListener('keydown', this.onKeyDown);
     this.resizeObserver.disconnect();
     this.controller.dispose();
+    this.hands.dispose();
     this.audio.dispose();
     disposeScene(this.world.scene);
     this.world.monitor.display.texture.dispose();
@@ -340,9 +403,12 @@ export class Simulator {
 
     if (this.focusAt && this.clock.elapsedTime < this.focusUntil) this.controller.lookToward(this.focusAt.x, this.focusAt.y, this.focusAt.z, 1 - Math.exp(-5 * dt));
     else this.focusAt = null;
+    this.wash?.update(dt);
     this.controller.update(dt);
     this.camera.updateMatrixWorld();
-    if (this.controller.locked) this.interaction.update(dt);
+    this.sink?.unit.update(dt);
+    this.hands.update(dt);
+    if (this.controller.locked && !this.wash?.active) this.interaction.update(dt);
 
     if (vitals !== this.lastVitals) {
       this.lastVitals = vitals;
@@ -354,6 +420,13 @@ export class Simulator {
     this.patientSounds(vitals, simDt, time);
     this.world.monitor.display.update(vitals, time, simDt);
     this.renderer.render(this.world.scene, this.camera);
+    if (this.hands.visible) {
+      // second pass: the hands are drawn over everything, so they can never sink into a wall or a table
+      this.renderer.autoClear = false;
+      this.renderer.clearDepth();
+      this.renderer.render(this.hands.scene, this.hands.camera);
+      this.renderer.autoClear = true;
+    }
   };
 
   /** Applies what the nurse did (oxygen, bed position) to the 3D scene and the sounds. */
@@ -426,6 +499,7 @@ export class Simulator {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (this.wash?.active) return; // hands are busy
     if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.use(this.interaction.target);
   };
 
@@ -435,5 +509,6 @@ export class Simulator {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.hands.setAspect(w / h);
   }
 }

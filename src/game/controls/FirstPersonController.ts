@@ -19,6 +19,8 @@ export interface ControllerEvents {
  */
 export class FirstPersonController {
   locked = false;
+  /** While true a scripted action (hand washing) owns the camera: keys, mouse and joystick are ignored. */
+  scripted = false;
   private yaw = 0;
   private pitch = 0;
   private keys = new Set<string>();
@@ -74,7 +76,7 @@ export class FirstPersonController {
 
   /** Drag-look in screen pixels. */
   addLook(dx: number, dy: number): void {
-    if (!this.locked) return;
+    if (!this.locked || this.scripted) return;
     this.yaw -= dx * TOUCH_SENS;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - dy * TOUCH_SENS));
   }
@@ -97,7 +99,24 @@ export class FirstPersonController {
     this.pitch += (Math.atan2(y - EYE_HEIGHT, Math.hypot(dx, dz)) - this.pitch) * k;
   }
 
+  /** Walk the player toward a spot (k = 0..1 of the way, per call). Only used while `scripted`. */
+  driveTo(x: number, z: number, k: number): void {
+    this.pos.x += (x - this.pos.x) * k;
+    this.pos.z += (z - this.pos.z) * k;
+    this.velocity.set(0, 0, 0);
+  }
+
+  /** How far the player is from a spot, in metres. */
+  distanceTo(x: number, z: number): number {
+    return Math.hypot(this.pos.x - x, this.pos.z - z);
+  }
+
   update(dt: number): void {
+    if (this.scripted) {
+      this.camera.position.set(this.pos.x, EYE_HEIGHT, this.pos.z);
+      this.camera.rotation.set(this.pitch, this.yaw, 0);
+      return;
+    }
     const kbForward = (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0);
     const kbStrafe = (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
     const forward = Math.max(-1, Math.min(1, kbForward + this.touchMove.y));
@@ -153,7 +172,7 @@ export class FirstPersonController {
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.locked || document.pointerLockElement !== this.dom) return;
+    if (!this.locked || this.scripted || document.pointerLockElement !== this.dom) return;
     const mx = Math.max(-200, Math.min(200, e.movementX));
     const my = Math.max(-200, Math.min(200, e.movementY));
     this.yaw -= mx * MOUSE_SENS;
