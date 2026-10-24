@@ -536,7 +536,7 @@ export class Simulator {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (this.wash?.active) return; // hands are busy
-    if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.use(this.interaction.target);
+    if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.use(this.interaction.refresh());
   };
 
   private resize(): void {
