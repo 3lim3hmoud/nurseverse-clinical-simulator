@@ -87,6 +87,8 @@ export class InteractionSystem {
     this.point.set(nx, ny);
     this.raycaster.setFromCamera(this.point, this.camera);
     this.raycaster.far = this.maxDistance * FAR_FACTOR + 2;
+    // only the nearest surface matters; BVH meshes can stop at their first hit
+    (this.raycaster as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true;
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
     for (const hit of hits) {
       if (hit.object.userData.ignoreRay) continue;
@@ -119,7 +121,20 @@ export class InteractionSystem {
     this.lastPos.copy(this.camera.position);
     this.lastQuat.copy(this.camera.quaternion);
 
-    const found = this.pick(0, 0, 1, RING_LIVE);
+    this.resolve(RING_LIVE);
+  }
+
+  /**
+   * Look right now, with the full aim-assist ring. Used when E is pressed, so a slow frame (or the 10 Hz throttle above)
+   * can never leave the nurse with an old answer: what you see under the crosshair is what E uses.
+   */
+  refresh(): InteractableInfo | null {
+    this.resolve(RING);
+    return this.target;
+  }
+
+  private resolve(ring: ReadonlyArray<readonly [number, number]>): void {
+    const found = this.pick(0, 0, 1, ring);
     const entry = found?.entry ?? null;
     const far = found ? !found.near : false;
     if (entry === this.current && far === this.currentFar) return;
