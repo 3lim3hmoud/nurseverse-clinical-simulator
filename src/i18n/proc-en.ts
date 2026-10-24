@@ -39,6 +39,10 @@ export const procEn: Record<string, string> = {
 
   'proc.picked': 'In the tray: {item}',
   'proc.bed': 'Bed head: {deg}°',
+  'wash.hint': 'Esc cancels the wash',
+  'wash.hintTouch': 'Pause cancels the wash',
+  'wash.faster': 'Faster ×3 (Space)',
+  'wash.normal': 'Normal speed (Space)',
   'proc.hands': 'Hands cleaned',
   'proc.stepDone': 'Step {n} done',
   'proc.exam.notNow': 'That does not work now. Think about what comes next.',

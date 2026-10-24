@@ -612,3 +612,20 @@ button.srow:disabled { cursor: default; }
 
 .dash > :not(.dash__body) { flex: none; }
 .objective--plain { grid-template-columns: 1fr !important; }
+
+/* ---------- Hand-wash card (WHO technique) ---------- */
+.washcard {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  width: min(520px, calc(100% - 24px)); padding: 12px 14px 10px;
+  display: grid; gap: 6px;
+  background: rgba(255, 255, 255, 0.96); border: 2px solid var(--teal, #1b8f93); border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3); z-index: 5; pointer-events: auto;
+}
+.washcard__head { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.washcard__n { flex: none; padding: 2px 9px; border-radius: 999px; background: var(--teal, #1b8f93); color: #fff; font-weight: 700; font-size: 13px; }
+.washcard__tip { margin: 0; font-size: 13px; color: #35525a; }
+.washcard__bar { height: 6px; border-radius: 99px; background: #dbe8ea; overflow: hidden; }
+.washcard__bar i { display: block; height: 100%; background: var(--teal, #1b8f93); transition: width 0.2s linear; }
+.washcard__foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: #5a747b; }
+.washcard__fast { border: 1px solid var(--teal, #1b8f93); background: #fff; color: var(--teal, #1b8f93); border-radius: 8px; padding: 4px 10px; font-weight: 600; cursor: pointer; }
+@media (max-width: 700px) { .washcard { bottom: 8px; padding: 8px 10px; } .washcard__tip { display: none; } }

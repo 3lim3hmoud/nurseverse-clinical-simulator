@@ -39,6 +39,10 @@ export const procAr: Record<string, string> = {
 
   'proc.picked': 'في الصينية: {item}',
   'proc.bed': 'رأس السرير: {deg}°',
+  'wash.hint': 'اضغط Esc لإلغاء الغسيل',
+  'wash.hintTouch': 'زر الإيقاف يلغي الغسيل',
+  'wash.faster': 'أسرع ×3 (Space)',
+  'wash.normal': 'السرعة العادية (Space)',
   'proc.hands': 'تم تعقيم اليدين',
   'proc.stepDone': 'تمت الخطوة {n}',
   'proc.exam.notNow': 'هذا لا يصلح الآن. فكّر فيما يأتي بعد ذلك.',
