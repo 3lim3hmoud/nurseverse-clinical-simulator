@@ -1,27 +1,8 @@
 import { mirrorHand, type HandPose, type HandsPose, type Vec3 } from './Hands';
+import { stepAt, totalSec, type Anchors, type ScriptStep } from './handsScript';
 
-/** View-space positions (see Hands.viewPoint) of the things the hands reach for. */
-export interface WashAnchors {
-  tap: Vec3;
-  soap: Vec3;
-  towel: Vec3;
-}
-
-export interface WashStep {
-  id: string;
-  en: string;
-  ar: string;
-  /** why it matters / how to do it, shown under the title */
-  tipEn: string;
-  tipAr: string;
-  /** seconds at normal speed */
-  sec: number;
-  /** is the tap running (u = 0..1 through the step) */
-  water: (u: number) => boolean;
-  /** lather on the hands at the start and the end of the step */
-  foam: [number, number];
-  pose(u: number, a: WashAnchors): HandsPose;
-}
+export type WashAnchors = Anchors;
+export type WashStep = ScriptStep;
 
 const PI = Math.PI;
 const H = (pos: Vec3, rot: Vec3, curl: HandPose['curl'], spread = 0): HandPose => ({ pos, rot, curl, spread });
@@ -57,7 +38,7 @@ const up = (x: number, y: number, z: number, o: { yaw?: number; roll?: number; l
  * The WHO hand-washing technique with soap and water (about 40-60 seconds), one entry per movement.
  * Each pose is a pure function of the progress through the step, so the animation can be scrubbed and tested.
  */
-export const WASH_STEPS: WashStep[] = [
+export const WASH_STEPS: ScriptStep[] = [
   {
     id: 'wet',
     en: 'Wet your hands with water',
@@ -275,14 +256,7 @@ for (const step of WASH_STEPS) {
   };
 }
 
-export const WASH_TOTAL_SEC = WASH_STEPS.reduce((n, s) => n + s.sec, 0);
+export const WASH_TOTAL_SEC = totalSec(WASH_STEPS);
 
 /** Which step and how far through it, for a time (seconds at normal speed) since the first step began. */
-export function washAt(t: number): { index: number; u: number; done: boolean } {
-  let left = Math.max(0, t);
-  for (const [i, s] of WASH_STEPS.entries()) {
-    if (left < s.sec) return { index: i, u: left / s.sec, done: false };
-    left -= s.sec;
-  }
-  return { index: WASH_STEPS.length - 1, u: 1, done: true };
-}
+export const washAt = (t: number) => stepAt(WASH_STEPS, t);

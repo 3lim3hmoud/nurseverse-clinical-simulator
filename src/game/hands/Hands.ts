@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { buildHeld, type HeldKind, type HeldSet } from './heldObjects';
+
+export type { HeldKind };
 
 export type Vec3 = [number, number, number];
 
@@ -22,8 +25,13 @@ export interface HandsPose {
   l: HandPose;
   /** soap lather on the hands, 0..1 */
   foam: number;
-  /** a paper towel in the right hand */
-  towel: boolean;
+  /** a paper towel in the right hand (same as held: 'towel') */
+  towel?: boolean;
+  /** something held in a hand, and which hand (default right) */
+  held?: HeldKind | null;
+  heldIn?: 'r' | 'l';
+  /** squeeze of a held bag, 0..1 */
+  squeeze?: number;
   /** how wet the skin looks, 0..1 */
   wet?: number;
 }
@@ -95,7 +103,7 @@ class HandRig {
   private bubbles: THREE.InstancedMesh;
   private bubbleData: { p: THREE.Vector3; size: number; at: number }[] = [];
   private lastFoam = -1;
-  readonly towel: THREE.Mesh;
+  private heldSet: HeldSet;
   readonly cuff: THREE.Mesh;
 
   constructor(private side: 1 | -1, handMat: THREE.Material, armMat: THREE.Material, sleeveMat: THREE.Material, foamMat: THREE.Material, glove: THREE.Material, nailMat: THREE.Material) {
@@ -170,10 +178,8 @@ class HandRig {
     root.add(this.bubbles);
     this.setFoam(0);
 
-    this.towel = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.003, 0.2), new THREE.MeshLambertMaterial({ color: 0xf6f4ee }));
-    this.towel.position.set(0, -0.021, -0.075);
-    this.towel.visible = false;
-    root.add(this.towel);
+    this.heldSet = buildHeld();
+    for (const obj of Object.values(this.heldSet.objects)) root.add(obj);
     root.scale.setScalar(1.12);
   }
 
@@ -194,6 +200,12 @@ class HandRig {
     });
   }
 
+  /** Show one held object (or none); the bag can be squeezed. */
+  setHeld(kind: HeldKind | null, squeeze = 0): void {
+    for (const [k, obj] of Object.entries(this.heldSet.objects)) obj.visible = k === kind;
+    if (kind === 'bag') this.heldSet.squeezeBag(squeeze);
+  }
+
   setFoam(level: number): void {
     if (Math.abs(level - this.lastFoam) < 0.012) return;
     this.lastFoam = level;
@@ -209,10 +221,45 @@ class HandRig {
   }
 }
 
+/** the top edge of a surgical mask, across the bottom of the view */
+function makeWornMask(): THREE.Object3D {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.3, -0.2);
+  shape.lineTo(-0.3, -0.058);
+  shape.quadraticCurveTo(-0.14, -0.083, 0, -0.07);
+  shape.quadraticCurveTo(0.14, -0.083, 0.3, -0.058);
+  shape.lineTo(0.3, -0.2);
+  const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), new THREE.MeshBasicMaterial({ color: 0xb4dcee, side: THREE.DoubleSide }));
+  mesh.position.z = -0.14;
+  const edge = new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(-0.3, -0.058, 0), new THREE.Vector3(0, -0.095, 0), new THREE.Vector3(0.3, -0.058, 0)), 12, 0.0025, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  edge.position.z = -0.1395;
+  const g = new THREE.Group();
+  g.add(mesh, edge);
+  return g;
+}
+
+/** the rim of safety goggles around the edge of the view */
+function makeWornGoggles(): THREE.Object3D {
+  const g = new THREE.Group();
+  const m = new THREE.MeshBasicMaterial({ color: 0x24323a });
+  const z = -0.12;
+  const hh = 0.084; // half height of the view at this depth
+  const hw = 0.124; // for an aspect of 1.5; the group is stretched to the real aspect
+  for (const [w, h, x, y] of [[0.5, 0.016, 0, hh - 0.004], [0.014, 0.2, -hw, 0], [0.014, 0.2, hw, 0]] as const) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.004), m);
+    bar.position.set(x, y, z);
+    g.add(bar);
+  }
+  const lens = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25), new THREE.MeshBasicMaterial({ color: 0xcfe9f5, transparent: true, opacity: 0.09, depthWrite: false }));
+  lens.position.z = -0.119;
+  g.add(lens);
+  return g;
+}
+
 const IDLE_R: HandPose = { pos: [0.16, -0.52, -0.3], rot: [0.5, 0, 0], curl: [0.3, 0.35, 0.35, 0.35, 0.35], spread: 0 };
 
 export const mirrorHand = (h: HandPose): HandPose => ({ pos: [-h.pos[0], h.pos[1], h.pos[2]], rot: [h.rot[0], -h.rot[1], -h.rot[2]], curl: h.curl, spread: h.spread, tilt: -(h.tilt ?? 0), lean: h.lean ?? 0 });
-export const IDLE_POSE: HandsPose = { r: IDLE_R, l: mirrorHand(IDLE_R), foam: 0, towel: false, wet: 0 };
+export const IDLE_POSE: HandsPose = { r: IDLE_R, l: mirrorHand(IDLE_R), foam: 0, held: null, wet: 0 };
 
 interface HandState {
   pos: THREE.Vector3;
@@ -242,7 +289,12 @@ export class Hands {
 
   private right: HandRig;
   private left: HandRig;
-  private skin = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.62, metalness: 0 });
+  private skinR = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.62, metalness: 0 });
+  private skinL = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.62, metalness: 0 });
+  private glovesOn = { r: false, l: false };
+  private worn = new THREE.Group();
+  private maskWorn: THREE.Object3D;
+  private gogglesWorn: THREE.Object3D;
   private state: { r: HandState; l: HandState };
   private target: HandsPose = IDLE_POSE;
   private foam = 0;
@@ -264,9 +316,15 @@ export class Hands {
     const nail = new THREE.MeshStandardMaterial({ color: NAIL, roughness: 0.3 });
     this.skinArm = arm;
     this.glove = glove;
-    this.right = new HandRig(1, this.skin, arm, sleeve, foam, glove, nail);
-    this.left = new HandRig(-1, this.skin, arm, sleeve, foam, glove, nail);
+    this.right = new HandRig(1, this.skinR, arm, sleeve, foam, glove, nail);
+    this.left = new HandRig(-1, this.skinL, arm, sleeve, foam, glove, nail);
     this.scene.add(this.right.root, this.left.root);
+    this.maskWorn = makeWornMask();
+    this.gogglesWorn = makeWornGoggles();
+    this.worn.add(this.maskWorn, this.gogglesWorn);
+    this.maskWorn.visible = false;
+    this.gogglesWorn.visible = false;
+    this.scene.add(this.worn);
     const init = (h: HandPose): HandState => ({ pos: new THREE.Vector3(...h.pos), quat: toQuat(h), curl: [...h.curl], spread: h.spread });
     this.state = { r: init(IDLE_POSE.r), l: init(IDLE_POSE.l) };
     this.place();
@@ -275,15 +333,36 @@ export class Hands {
   private skinArm: THREE.MeshStandardMaterial;
   private glove: THREE.MeshStandardMaterial;
 
-  /** Hands in the gloves (blue nitrile) or bare. */
-  setGloves(on: boolean): void {
-    this.skin.color.setHex(on ? GLOVE : SKIN);
-    this.skin.roughness = on ? 0.35 : 0.62;
-    this.right.cuff.visible = on;
-    this.left.cuff.visible = on;
+  /** Hands in the gloves (blue nitrile) or bare, each hand on its own. */
+  setGloves(on: boolean | { r: boolean; l: boolean }): void {
+    const g = typeof on === 'boolean' ? { r: on, l: on } : on;
+    this.glovesOn = g;
+    for (const [mat, rig, v] of [[this.skinR, this.right, g.r], [this.skinL, this.left, g.l]] as const) {
+      mat.color.setHex(v ? GLOVE : SKIN);
+      rig.cuff.visible = v;
+    }
+  }
+
+  get gloved(): { r: boolean; l: boolean } {
+    return this.glovesOn;
+  }
+
+  get maskOn(): boolean {
+    return this.maskWorn.visible;
+  }
+
+  get gogglesOn(): boolean {
+    return this.gogglesWorn.visible;
+  }
+
+  /** The mask and goggles the nurse is wearing show at the edge of the view. */
+  setWorn(mask: boolean, goggles: boolean): void {
+    this.maskWorn.visible = mask;
+    this.gogglesWorn.visible = goggles;
   }
 
   setAspect(aspect: number): void {
+    this.gogglesWorn.scale.x = aspect / 1.5;
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
   }
@@ -299,6 +378,15 @@ export class Hands {
     this.target = p;
   }
 
+  private gesture: { fn: (u: number) => HandsPose; sec: number; t: number } | null = null;
+
+  /** A short free-standing movement (reaching for something on a table): plays once, then the hands go down. */
+  playGesture(sec: number, fn: (u: number) => HandsPose): void {
+    this.gesture = { fn, sec, t: 0 };
+    this.show(true);
+    this.setPose(fn(0));
+  }
+
   /** Jump straight to the target (no smoothing). */
   snap(): void {
     this.step(1);
@@ -306,6 +394,16 @@ export class Hands {
 
   update(dt: number): void {
     if (!this.visible) return;
+    if (this.gesture) {
+      const g = this.gesture;
+      g.t += dt;
+      if (g.t >= g.sec) {
+        this.gesture = null;
+        this.show(false);
+      } else {
+        this.setPose(g.fn(g.t / g.sec));
+      }
+    }
     this.step(1 - Math.exp(-14 * dt));
     if (!this.wanted && this.state.r.pos.y < -0.45 && this.state.l.pos.y < -0.45) this.visible = false;
   }
@@ -344,10 +442,15 @@ export class Hands {
     }
     this.foam += (t.foam - this.foam) * Math.min(1, k * 0.5);
     this.wet += ((t.wet ?? 0) - this.wet) * Math.min(1, k * 0.4);
-    // wet skin is shinier
-    this.skin.roughness = THREE.MathUtils.lerp(0.62, 0.3, this.wet);
-    this.skinArm.roughness = this.skin.roughness;
-    this.right.towel.visible = t.towel;
+    // wet skin is shinier (gloves are always a little shiny)
+    const rough = THREE.MathUtils.lerp(0.62, 0.3, this.wet);
+    this.skinR.roughness = this.glovesOn.r ? 0.35 : rough;
+    this.skinL.roughness = this.glovesOn.l ? 0.35 : rough;
+    this.skinArm.roughness = rough;
+    const held = t.held ?? (t.towel ? 'towel' : null);
+    const inRight = (t.heldIn ?? 'r') === 'r';
+    this.right.setHeld(inRight ? held : null, t.squeeze ?? 0);
+    this.left.setHeld(inRight ? null : held, t.squeeze ?? 0);
     this.place();
   }
 

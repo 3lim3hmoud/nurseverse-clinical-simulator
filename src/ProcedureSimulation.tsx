@@ -9,7 +9,7 @@ import { ProcedureSession, type Check, type Context, type SessionResult } from '
 import type { Mode, ProcedureDef } from './domain/procedures/types';
 import { createStablePatient } from './domain/procedures/stablePatient';
 import { Simulator, type InteractableInfo } from './game/Simulator';
-import type { WashProgress } from './game/hands/HandWashRun';
+import type { RunProgress } from './game/hands/HandsRun';
 import HandWashCard from './ui/HandWashCard';
 import { buildSupplyArea, type PropItem, type SupplyArea } from './game/world/ProcedureProps';
 import { useI18n } from './i18n';
@@ -88,7 +88,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   const [howto, setHowto] = useState(false);
   const [muted, setMuted] = useState(false);
   /** Set while the nurse is washing her hands at the sink (the WHO technique plays out step by step). */
-  const [wash, setWash] = useState<WashProgress | null>(null);
+  const [wash, setWash] = useState<RunProgress | null>(null);
   const [washFast, setWashFast] = useState(false);
   const areaRef = useRef<SupplyArea | null>(null);
 
@@ -203,9 +203,13 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       const stepNow = session.actions.find((a) => a.key === key);
       const kind = stepNow?.stepIndex != null ? session.def.steps[stepNow.stepIndex].kind : 'bedside';
       if (!touch) simRef.current?.lock();
-      if (kind === 'hygiene') {
+      const sim = simRef.current;
+      const stepIdx = stepNow?.stepIndex ?? -1;
+      const stepEn = stepIdx >= 0 ? session.def.steps[stepIdx].en : '';
+      // hand work the nurse performs with her own hands: the wash and PPE, or the task at the bedside
+      const startScript = (starter: (p: (r: RunProgress) => void, d: () => void, speed: number) => boolean | undefined): boolean => {
         washKey.current = key;
-        const started = simRef.current?.startHandWash(
+        const ok = starter(
           (p) => setWash(p),
           () => {
             washKey.current = null;
@@ -215,11 +219,19 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
           },
           devQuickWash() ? 20 : washFastRef.current ? 3 : 1,
         );
-        if (started) return;
-        washKey.current = null;
-        simRef.current?.focusOn(HYGIENE_STATION.x, 1.15, HYGIENE_STATION.z, actionSeconds() + 0.4);
-      } else if (kind === 'position') simRef.current?.focusOn(0, 0.9, -2.0, actionSeconds() + 0.4);
-      else if (kind === 'bedside') simRef.current?.focusOn(0, 0.95, -1.5, actionSeconds() + 0.4);
+        if (!ok) washKey.current = null;
+        return !!ok;
+      };
+      if (kind === 'hygiene') {
+        // the first hygiene step ends with the PPE going on; the last one starts with it coming off
+        const ppe = stepIdx === 0 ? 'don' : 'doff';
+        if (startScript((p, d, sp) => sim?.startHandWash(p, d, sp, ppe))) return;
+        sim?.focusOn(HYGIENE_STATION.x, 1.15, HYGIENE_STATION.z, actionSeconds() + 0.4);
+      } else if (kind === 'position' || kind === 'bedside') {
+        if (startScript((p, d, sp) => sim?.startBedside(stepEn, p, d, sp))) return;
+        if (kind === 'position') sim?.focusOn(0, 0.9, -2.0, actionSeconds() + 0.4);
+        else sim?.focusOn(0, 0.95, -1.5, actionSeconds() + 0.4);
+      }
       actionTimer.current = window.setTimeout(() => complete(key), actionSeconds() * 1000);
     },
     [busy, result, context, session, explain, touch, complete],
@@ -238,6 +250,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       if (!prop || !session.pick(id).ok) return;
       simRef.current?.unregisterExtra(prop.root);
       prop.remove();
+      simRef.current?.pickGesture();
       showToast(t('proc.picked', { item: prop.label.split(' · ')[lang === 'ar' ? 1 : 0] }));
       bump((n) => n + 1);
     } else if (tgt.id === 'bed-control') {
@@ -310,6 +323,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
     );
     sim.relabel('patient', 'Patient · المريض');
     sim.setAlarmSound(false); // the alarm light shows on the monitor; a siren would only get in the way of practising
+    sim.setVentilatorAnchor(area.ventilator?.outlet ?? null);
     if (area.ventilator) {
       const outlet = area.ventilator.outlet;
       sim.addCable(
@@ -368,7 +382,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
       e.preventDefault();
       washFastRef.current = !washFastRef.current;
       setWashFast(washFastRef.current);
-      simRef.current?.setHandWashSpeed(washFastRef.current ? 3 : 1);
+      simRef.current?.setHandsSpeed(washFastRef.current ? 3 : 1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -493,7 +507,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
                 onFaster={() => {
                   washFastRef.current = !washFastRef.current;
                   setWashFast(washFastRef.current);
-                  simRef.current?.setHandWashSpeed(washFastRef.current ? 3 : 1);
+                  simRef.current?.setHandsSpeed(washFastRef.current ? 3 : 1);
                 }}
               />
             )}

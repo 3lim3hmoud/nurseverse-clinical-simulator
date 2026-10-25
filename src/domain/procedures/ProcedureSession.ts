@@ -120,7 +120,7 @@ export class ProcedureSession {
       const foreign = shuffle(DISTRACTOR_STEPS, rnd).filter((s) => !stepKeys.has(norm(s.en)));
       const fake: ActionRef[] = foreign.slice(0, 3).map((s, n) => ({ key: `x-${def.id}-${n}`, stepIndex: null, en: s.en, ar: s.ar }));
       this.actions = shuffle([...stepActions, ...fake], rnd);
-      this.limitSec = def.steps.length * 50 + 120;
+      this.limitSec = def.steps.length * 50 + 120 + 240; // + the time the hands need for the wash, PPE and bedside tasks
     } else {
       this.items = required;
       this.actions = stepActions;
