@@ -1,4 +1,5 @@
 import { useI18n } from '../i18n';
+import { openSettings } from '../uiState';
 import LangSwitch from './LangSwitch';
 
 interface Props {
@@ -18,7 +19,12 @@ export default function StartOverlay({ introKey, started, error, touch, onStart,
       <div className="overlay__card">
         <div className="menu__top">
           <h1>{t('app.title')}</h1>
-          <LangSwitch />
+          <span className="menu__tools">
+            <button type="button" className="gear" onClick={openSettings} aria-label={t('set.open')}>
+              ⚙
+            </button>
+            <LangSwitch />
+          </span>
         </div>
         {error ? (
           <p className="overlay__error">{error}</p>

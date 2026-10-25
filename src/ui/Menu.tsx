@@ -4,6 +4,8 @@ import { allItems, PROCEDURES } from '../domain/procedures/catalog';
 import type { Mode, ProcedureId } from '../domain/procedures/types';
 import { SCENARIOS, type ScenarioId } from '../domain/scenarios';
 import { useI18n } from '../i18n';
+import { openSettings } from '../uiState';
+import InstallButton from './InstallButton';
 import LangSwitch from './LangSwitch';
 
 interface Props {
@@ -19,8 +21,14 @@ export default function Menu({ onPick, onPickProcedure }: Props) {
       <div className="overlay__card menu">
         <div className="menu__top">
           <h1>{t('app.title')}</h1>
-          <LangSwitch />
+          <span className="menu__tools">
+            <button type="button" className="gear" onClick={openSettings} aria-label={t('set.open')}>
+              ⚙
+            </button>
+            <LangSwitch />
+          </span>
         </div>
+        <InstallButton />
 
         {PROCEDURES.map((p) => (
           <section key={p.id} className="hero">

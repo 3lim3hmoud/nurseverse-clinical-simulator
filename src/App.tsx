@@ -25,6 +25,8 @@ import PatientPanel, { type PatientActions } from './ui/PatientPanel';
 import ResultsScreen from './ui/ResultsScreen';
 import StartOverlay from './ui/StartOverlay';
 import TouchControls from './ui/TouchControls';
+import { openSettings } from './uiState';
+import { panelStartsOpen } from './settings';
 import VitalsPanel from './ui/VitalsPanel';
 
 type PanelId = 'vitals' | 'oxygen' | 'patient' | 'iv' | 'meds' | 'chat';
@@ -87,7 +89,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
   /** Desktop: non-null while the mouse is free to click in the dashboard. Phone: an object panel (monitor, oxygen...) is open. */
   const [panel, setPanel] = useState<PanelId | null>(null);
   const [tab, setTab] = useState<TabId>('case');
-  const [dashOpen, setDashOpen] = useState(true);
+  const [dashOpen, setDashOpen] = useState(() => panelStartsOpen(touch));
   const [alarm, setAlarm] = useState<AlarmState>({ active: false, silenced: false, codes: [], message: '' });
   const [toast, setToast] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -491,7 +493,7 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
 
         {playing && (
           <>
-            <Hud target={target} panelOpen={panel !== null} />
+            <Hud target={target} panelOpen={panel !== null} touch={touch} />
             {toast && (
               <div className="stage__notes">
                 <div className="toast" role="status">
@@ -519,6 +521,10 @@ function Simulation({ scenario, onRestart, onMenu }: { scenario: Scenario; onRes
             onToggleMute={toggleMute}
             dashOpen={dashOpen}
             onToggleDash={() => setDashOpen((o) => !o)}
+            onSettings={() => {
+              simRef.current?.stopTouch();
+              openSettings();
+            }}
           />
         )}
       </div>

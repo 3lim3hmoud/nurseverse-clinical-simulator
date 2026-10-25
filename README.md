@@ -100,3 +100,23 @@ pixel ratio capped at 1.5, monitor screen drawn on one small canvas texture.
 - New equipment: add a builder in `game/world/`, place it in `ClinicalScene.ts`, register it with `InteractionSystem.register`.
 - AI conversation / debriefing: implement `PatientConversationService` / `DebriefingService` in `services/ai`.
 - New case: add an engine, a scorer, findings and a scenario in `domain/scenarios`, plus `hx.<id>.*` interview answers and `sbar.*` strings in `i18n/extra-*.ts`.
+
+## Install it as an app (PWA) and play offline
+
+The game is a Progressive Web App. Open the published site once with internet, then:
+
+- **Android / Chrome / Edge**: tap *Install the app* on the start screen (or the browser's install icon).
+- **iPhone / iPad (Safari)**: tap Share, then *Add to Home Screen*.
+
+After the first load everything (the 3D models included) is stored on the device, so it opens and plays without internet. A new
+version is downloaded in the background and a *Reload* notice appears when it is ready. The AI features (patient voice, doctor chat,
+debrief) need internet and fall back to the built-in answers offline.
+
+`vite build` writes `dist/sw.js` with the list of every built file (see `vite.config.ts` and `src/sw.template.js`).
+
+## Settings and the on-screen controls
+
+The gear button (start screen, pause menu, and the top row while playing) opens the settings: joystick and E button size, how
+visible they are, left-handed layout, look speed, inverted look, vibration, graphics quality, and whether the side panel starts
+open. On a phone, *Move the controls on the screen* lets you drag the joystick, the E button and the top buttons to where your
+thumbs like them (separately for sideways and upright). Everything is saved on the device (`localStorage`, key `nv.settings.v1`).

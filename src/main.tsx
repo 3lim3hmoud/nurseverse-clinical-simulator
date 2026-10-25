@@ -2,7 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { preloadModels } from './game/world/models';
+import { setupPwa } from './pwa';
+import SettingsHost from './ui/SettingsHost';
 import './styles.css';
+
+setupPwa();
 
 const root = createRoot(document.getElementById('root')!);
 
@@ -12,6 +16,7 @@ preloadModels().finally(() =>
   root.render(
     <StrictMode>
       <App />
+      <SettingsHost />
     </StrictMode>,
   ),
 );

@@ -1,3 +1,4 @@
+import { getSettings } from '../../settings';
 import * as THREE from 'three';
 import { PLAYER_START, type Rect } from '../layout';
 
@@ -77,8 +78,9 @@ export class FirstPersonController {
   /** Drag-look in screen pixels. */
   addLook(dx: number, dy: number): void {
     if (!this.locked || this.scripted) return;
-    this.yaw -= dx * TOUCH_SENS;
-    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - dy * TOUCH_SENS));
+    const { lookSens, invertY } = getSettings();
+    this.yaw -= dx * TOUCH_SENS * lookSens;
+    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - dy * TOUCH_SENS * lookSens * (invertY ? -1 : 1)));
   }
 
   dispose(): void {

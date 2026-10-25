@@ -1,0 +1,20 @@
+{
+  "name": "NurseVerse Clinical Simulator",
+  "short_name": "NurseVerse",
+  "description": "Practice nursing procedures and clinical cases in a 3D hospital, with your own hands, in English and Arabic.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1a1d",
+  "theme_color": "#0b1a1d",
+  "lang": "en",
+  "dir": "auto",
+  "categories": ["education", "medical"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
