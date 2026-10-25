@@ -24,6 +24,8 @@ import { StepsTab, TrayTab } from './ui/ProcedurePanels';
 import ProcedureResults from './ui/ProcedureResults';
 import StartOverlay from './ui/StartOverlay';
 import TouchControls from './ui/TouchControls';
+import { openSettings } from './uiState';
+import { panelStartsOpen } from './settings';
 
 type TabId = 'steps' | 'map' | 'tray' | 'coach';
 
@@ -74,7 +76,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
   const [tab, setTab] = useState<TabId>('steps');
   /** Desktop only: non-null while the mouse is free to click inside the dashboard (the room is paused for the mouse). */
   const [panel, setPanel] = useState<TabId | null>(null);
-  const [dashOpen, setDashOpen] = useState(true);
+  const [dashOpen, setDashOpen] = useState(() => panelStartsOpen(touch));
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<SessionResult | null>(null);
@@ -497,7 +499,7 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
 
         {playing && (
           <>
-            <Hud target={target} panelOpen={panel !== null || wash !== null} quiet={busy !== null || wash !== null} />
+            <Hud target={target} panelOpen={panel !== null || wash !== null} quiet={busy !== null || wash !== null} touch={touch} />
             {wash && (
               <HandWashCard
                 progress={wash}
@@ -545,6 +547,10 @@ export default function ProcedureSimulation({ def, mode, onRestart, onMenu }: Pr
             onToggleMute={toggleMute}
             dashOpen={dashOpen}
             onToggleDash={() => setDashOpen((o) => !o)}
+            onSettings={() => {
+              simRef.current?.stopTouch();
+              openSettings();
+            }}
           />
         )}
 

@@ -1,11 +1,14 @@
 import { useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { PointerEvent } from 'react';
 import { useI18n } from '../i18n';
+import { buzz, useSettings } from '../settings';
+import { sizeVars, spotStyle, useOrientation } from './touchLayout';
 
 const RADIUS_RATIO = 0.38; // knob travel as a share of the joystick width
 const DEADZONE = 0.14;
 
-function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
+function Joystick({ onMove, style, label }: { onMove: (x: number, y: number) => void; style?: CSSProperties; label?: string }) {
   const baseRef = useRef<HTMLDivElement>(null);
   const activeId = useRef<number | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -37,6 +40,7 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
     <div
       ref={baseRef}
       className="joystick"
+      style={style}
       aria-label="Move"
       onPointerDown={(e) => {
         activeId.current = e.pointerId;
@@ -49,7 +53,14 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
       onPointerUp={end}
       onPointerCancel={end}
     >
+      <span className="joystick__arrows" aria-hidden="true">
+        <i>▲</i>
+        <i>▼</i>
+        <i>◀</i>
+        <i>▶</i>
+      </span>
       <div className="joystick__knob" style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }} />
+      {label && <span className="tc-label">{label}</span>}
     </div>
   );
 }
@@ -98,26 +109,34 @@ interface Props {
   onToggleMute: () => void;
   dashOpen: boolean;
   onToggleDash: () => void;
+  onSettings: () => void;
 }
 
-export default function TouchControls({ canInteract, onMove, onLook, onTap, onInteract, onPause, muted, onToggleMute, dashOpen, onToggleDash }: Props) {
+export default function TouchControls({ canInteract, onMove, onLook, onTap, onInteract, onPause, muted, onToggleMute, dashOpen, onToggleDash, onSettings }: Props) {
   const { t } = useI18n();
+  const settings = useSettings();
+  const orient = useOrientation();
+  const spots = settings.layout[orient];
+  const onLookScaled = onLook;
   return (
-    <div className="touch">
-      <LookZone onLook={onLook} onTap={onTap} />
-      <Joystick onMove={onMove} />
+    <div className={`touch${settings.leftHanded ? ' touch--lefty' : ''}`} style={sizeVars(settings)}>
+      <LookZone onLook={onLookScaled} onTap={onTap} />
+      <Joystick onMove={onMove} style={spotStyle(spots.joy)} label={settings.labels ? t('ctl.label.move') : undefined} />
       <button
         type="button"
         className={`touch__act${canInteract ? ' touch__act--ready' : ''}`}
+        style={spotStyle(spots.act)}
         aria-label="Interact"
         onPointerDown={(e) => {
           e.preventDefault();
+          buzz(canInteract ? 25 : 8);
           onInteract();
         }}
       >
         E
+        {settings.labels && <span className="tc-label">{t('ctl.label.use')}</span>}
       </button>
-      <div className="touch__top">
+      <div className="touch__top" style={spotStyle(spots.top)}>
         <button type="button" onClick={onPause} aria-label={t('touch.pause')}>
           ⏸
         </button>
@@ -126,6 +145,9 @@ export default function TouchControls({ canInteract, onMove, onLook, onTap, onIn
         </button>
         <button type="button" onClick={onToggleDash} aria-label={t(dashOpen ? 'dash.hide' : 'dash.show')} aria-pressed={dashOpen}>
           ☰
+        </button>
+        <button type="button" onClick={onSettings} aria-label={t('set.open')}>
+          ⚙
         </button>
       </div>
     </div>

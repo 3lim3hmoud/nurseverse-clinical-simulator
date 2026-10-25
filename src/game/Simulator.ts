@@ -1,3 +1,4 @@
+import { getSettings } from '../settings';
 import * as THREE from 'three';
 import { Hands } from './hands/Hands';
 import { HandsRun, type RunProgress, type RunEnv } from './hands/HandsRun';
@@ -81,6 +82,7 @@ export class Simulator {
   private holdUntil = 0;
   private hold = 6;
   private cpuBoundUntil = 0;
+  private minQuality = MIN_QUALITY;
   private legAngle = 0;
   private lastVitals: ReturnType<PatientModel['getVitals']> | null = null;
   private lastInterventions: Interventions | null = null;
@@ -91,9 +93,11 @@ export class Simulator {
     const dpr = window.devicePixelRatio || 1;
     // Smooth edges (MSAA is cheap on phone GPUs) and a sharp image; the resolution governor lowers the pixel count if a
     // device cannot hold 60 fps, so strong devices stay crisp and weak ones stay fluid.
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: false });
+    const quality = getSettings().quality; // 'low' for old phones, 'high' for the sharpest picture, 'auto' adapts
+    this.renderer = new THREE.WebGLRenderer({ antialias: quality !== 'low', powerPreference: 'high-performance', stencil: false });
     const coarse = window.matchMedia('(pointer: coarse)').matches;
-    this.basePixelRatio = Math.min(dpr, coarse ? 1.5 : 2);
+    this.basePixelRatio = quality === 'low' ? 1 : Math.min(dpr, quality === 'high' ? 2.5 : coarse ? 1.5 : 2);
+    this.minQuality = quality === 'high' ? 0.85 : quality === 'low' ? 0.6 : MIN_QUALITY;
     this.renderer.setPixelRatio(this.basePixelRatio);
     container.appendChild(this.renderer.domElement);
 
@@ -427,10 +431,10 @@ export class Simulator {
         this.cpuBoundUntil = now + 60;
       }
       this.fpsBeforeDrop = null;
-    } else if (fps < 52 && now >= this.cpuBoundUntil && this.quality > MIN_QUALITY) {
+    } else if (fps < 52 && now >= this.cpuBoundUntil && this.quality > this.minQuality) {
       this.fpsBeforeDrop = fps;
       this.qualityBeforeDrop = this.quality;
-      next = Math.max(MIN_QUALITY, this.quality - (fps < 35 ? 0.2 : 0.1));
+      next = Math.max(this.minQuality, this.quality - (fps < 35 ? 0.2 : 0.1));
       this.holdUntil = now + this.hold;
       this.hold = Math.min(30, this.hold * 2);
     } else if (fps > 58 && now >= this.holdUntil && this.quality < 1) {

@@ -1,6 +1,7 @@
 import { procAr } from './proc-ar';
 import { featuresAr } from './features-ar';
 import { extraAr } from './extra-ar';
+import { settingsAr } from './settings-ar';
 /** Arabic strings (same keys as en.ts). */
 export const ar: Record<string, string> = {
   'app.title': 'NurseVerse – المحاكي السريري',
@@ -270,4 +271,5 @@ export const ar: Record<string, string> = {
   ...extraAr,
   ...featuresAr,
   ...procAr,
+  ...settingsAr,
 };
