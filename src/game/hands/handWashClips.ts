@@ -35,12 +35,23 @@ const wave = (u: number, cycles: number) => Math.sin(u * cycles * 2 * PI);
 const ease = (x: number) => x * x * (3 - 2 * x);
 const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const add = (a: Vec3, x: number, y: number, z: number): Vec3 => [a[0] + x, a[1] + y, a[2] + z];
+/** keep a reach target inside the middle of the view, so both arms stay on screen */
+const inside = (p: Vec3, max = 0.13): Vec3 => [Math.max(-max, Math.min(max, p[0])), p[1], p[2]];
 
 const Y = -0.085;
 const Z = -0.47;
 
 /** Hands up, fingers up, palm facing the other hand (the right one; mirror for the left). */
 const PRAYER: Vec3 = [PI / 2, PI / 2, 0];
+/** a hand held up with the fingers leaning away, the way you hold them to rub: the wrists are apart, the fingers lean together */
+const up = (x: number, y: number, z: number, o: { yaw?: number; roll?: number; lean?: number; tilt?: number; curl?: HandPose['curl']; spread?: number } = {}): HandPose => ({
+  pos: [x, y, z],
+  rot: [PI / 2, PI / 2 + (o.yaw ?? 0), o.roll ?? 0],
+  curl: o.curl ?? open,
+  spread: o.spread ?? 0.05,
+  tilt: o.tilt ?? 0.14,
+  lean: o.lean ?? -0.5,
+});
 
 /**
  * The WHO hand-washing technique with soap and water (about 40-60 seconds), one entry per movement.
@@ -70,8 +81,8 @@ export const WASH_STEPS: WashStep[] = [
     pose: (u, a) => {
       const press = u > 0.25 && u < 0.55 ? Math.sin(((u - 0.25) / 0.3) * PI) : 0;
       const reach = ease(Math.min(1, u / 0.25)) * (1 - ease(Math.max(0, (u - 0.6) / 0.35)));
-      const r = H(lerp3([0.07, Y, Z], add(a.soap, 0.1, -0.09 - 0.03 * press, 0.0), reach), [0.5, 0.3, 0.2], [0.4, 0.55, 0.55, 0.6, 0.6], 0.1);
-      const l = H(lerp3([-0.07, Y, Z], add(a.soap, 0.03, -0.2, 0.02), reach), [0.45, -0.1, -PI * 0.88], relaxed, 0.2);
+      const r = H(lerp3([0.07, Y, Z], inside(add(a.soap, 0.1, -0.09 - 0.03 * press, 0.0)), reach), [0.5, 0.3, 0.2], [0.4, 0.55, 0.55, 0.6, 0.6], 0.1);
+      const l = H(lerp3([-0.07, Y, Z], inside(add(a.soap, 0.03, -0.2, 0.02), 0.1), reach), [0.45, -0.1, -PI * 0.88], relaxed, 0.2);
       return { r, l, foam: 0.15, towel: false };
     },
   },
@@ -86,9 +97,9 @@ export const WASH_STEPS: WashStep[] = [
     foam: [0.3, 0.5],
     pose: (u) => {
       const s = wave(u, 5) * 0.03;
-      const r = H([0.014, Y + s, Z], PRAYER, open, 0.05);
-      const l = H([-0.014, Y - s, Z], [PRAYER[0], -PRAYER[1], 0], open, 0.05);
-      return { r, l, foam: 0.5, towel: false };
+      const r = up(0.026, Y + s, Z);
+      const l = mirrorHand(up(0.026, Y - s, Z));
+      return { r, l, foam: 0.5, towel: false, wet: 0.6 };
     },
   },
   {
@@ -103,10 +114,11 @@ export const WASH_STEPS: WashStep[] = [
     pose: (u) => {
       const first = u < 0.5;
       const v = first ? u * 2 : (u - 0.5) * 2;
-      const slide = wave(v, 3) * 0.028;
-      const l = H([-0.035, Y - 0.04, Z - 0.02], [0.05, 0.1, 0], open, 0.5);
-      const r = H([0.0, Y + 0.012, Z + 0.04 + slide], [0.0, -0.55, 0], open, 0.6);
-      const p: HandsPose = { r, l, foam: 0.65, towel: false };
+      const slide = wave(v, 3) * 0.03;
+      // left hand rests with its back to the nurse; the right hand lies across it, fingers between the fingers
+      const l = H([-0.035, Y - 0.025, Z], [0.62, 0.12, 0], open, 0.45);
+      const r = H([0.03 - slide * 0.5, Y + 0.035 + slide * 0.2, Z + 0.035 - slide * 0.85], [0.5, 0.62, 0], open, 0.6);
+      const p: HandsPose = { r, l, foam: 0.65, towel: false, wet: 0.6 };
       return first ? p : swap(p);
     },
   },
@@ -120,10 +132,10 @@ export const WASH_STEPS: WashStep[] = [
     water: () => false,
     foam: [0.65, 0.75],
     pose: (u) => {
-      const s = wave(u, 5) * 0.03;
-      const r = H([0.01, Y + s, Z], [PI / 2, PI / 2 - 0.4, 0], [0.1, 0.18, 0.18, 0.18, 0.18], 1);
-      const l = H([-0.01, Y - s, Z], [PI / 2, -(PI / 2 - 0.4), 0], [0.1, 0.18, 0.18, 0.18, 0.18], 1);
-      return { r, l, foam: 0.75, towel: false };
+      const s = wave(u, 5) * 0.028;
+      const r = up(0.024, Y + s, Z, { yaw: -0.5, curl: [0.1, 0.2, 0.2, 0.2, 0.2], spread: 1, tilt: 0.1, lean: -0.55 });
+      const l = mirrorHand(up(0.024, Y - s, Z + 0.01, { yaw: -0.5, curl: [0.1, 0.2, 0.2, 0.2, 0.2], spread: 1, tilt: 0.1, lean: -0.55 }));
+      return { r, l, foam: 0.75, towel: false, wet: 0.6 };
     },
   },
   {
@@ -173,9 +185,10 @@ export const WASH_STEPS: WashStep[] = [
       const first = u < 0.5;
       const v = first ? u * 2 : (u - 0.5) * 2;
       const a = v * 3 * 2 * PI;
-      const l = H([-0.04, Y - 0.04, Z - 0.02], [0.2, -0.2, PI * 0.95], open, 0.1);
-      const r = H([-0.03 + Math.cos(a) * 0.018, Y + 0.0, Z + 0.0 + Math.sin(a) * 0.018], [0.15, 0.35, 0], [0.3, 0.62, 0.66, 0.66, 0.62]);
-      const p: HandsPose = { r, l, foam: 0.8, towel: false };
+      // left palm up and tilted toward the nurse; the right fingertips, bunched together, circle in it
+      const l = H([-0.02, Y - 0.03, Z + 0.01], [0.75, -0.1, PI * 0.96], [0.15, 0.1, 0.1, 0.1, 0.12], 0.1);
+      const r = H([0.07 + Math.cos(a) * 0.012, Y + 0.045, Z + 0.045 + Math.sin(a) * 0.012], [-0.3, 0.9, 0], [0.45, 0.62, 0.66, 0.66, 0.62]);
+      const p: HandsPose = { r, l, foam: 0.8, towel: false, wet: 0.6 };
       return first ? p : swap(p);
     },
   },
@@ -191,9 +204,10 @@ export const WASH_STEPS: WashStep[] = [
     pose: (u) => {
       const first = u < 0.5;
       const v = first ? u * 2 : (u - 0.5) * 2;
-      const l = H([-0.05, Y - 0.02, Z - 0.05], [0.7, 0.25, 0], relaxed, 0.1);
-      const r = H([-0.015, Y + 0.0, Z + 0.0], [0.1, 1.45, 0.25 + wave(v, 3) * 0.5], [0.55, 1, 1, 1, 1]);
-      const p: HandsPose = { r, l, foam: 0.8, towel: false };
+      // left hand held up and relaxed; the right hand closes around the left wrist and turns
+      const l = H([-0.035, Y - 0.01, Z - 0.02], [1.0, 0.25, 0], relaxed, 0.1);
+      const r = H([-0.012, Y - 0.005, Z + 0.075], [0.2, 1.3, 0.2 + wave(v, 3) * 0.45], [0.5, 1, 1, 1, 1]);
+      const p: HandsPose = { r, l, foam: 0.8, towel: false, wet: 0.6 };
       return first ? p : swap(p);
     },
   },
@@ -208,7 +222,8 @@ export const WASH_STEPS: WashStep[] = [
     foam: [0.8, 0],
     pose: (u) => {
       const s = wave(u, 4) * 0.012;
-      const r = H([0.05 + s, Y + 0.04, Z - 0.02], [-0.9, 0.35, 0.15], [0.15, 0.15, 0.15, 0.15, 0.15], 0.35);
+      // fingers angled down into the water, the forearms still come from below (the wrists arch over the basin)
+      const r = H([0.04 + s, Y - 0.045, Z - 0.03], [0.4, 0.05, -PI / 2], [0.12, 0.12, 0.12, 0.12, 0.12], 0.25);
       return both(r, 0.8 * (1 - u));
     },
   },
@@ -250,6 +265,15 @@ export const WASH_STEPS: WashStep[] = [
     },
   },
 ];
+
+for (const step of WASH_STEPS) {
+  const raw = step.pose;
+  step.pose = (u, a) => {
+    const p = raw(u, a);
+    if (p.wet === undefined) p.wet = step.id === 'rinse' ? 1 : step.id === 'dry' ? Math.max(0, 0.8 * (1 - u * 1.4)) : 0.6;
+    return p;
+  };
+}
 
 export const WASH_TOTAL_SEC = WASH_STEPS.reduce((n, s) => n + s.sec, 0);
 

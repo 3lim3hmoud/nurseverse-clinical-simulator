@@ -8,10 +8,13 @@ export interface HandPose {
   pos: Vec3;
   /** Euler angles, applied roll (z) first, then pitch (x), then yaw (y). Neutral: fingers point away, palm faces down. */
   rot: Vec3;
-  /** 0 = straight, 1 = fully curled: thumb, index, middle, ring, little finger */
   curl: [number, number, number, number, number];
   /** 0 = fingers together, 1 = fanned out */
   spread: number;
+  /** extra lean around the line of sight, so the forearms can make a natural V instead of two parallel poles */
+  tilt?: number;
+  /** extra lean of the whole hand toward (+) or away from (-) the nurse, about the view's x axis */
+  lean?: number;
 }
 
 export interface HandsPose {
@@ -21,37 +24,59 @@ export interface HandsPose {
   foam: number;
   /** a paper towel in the right hand */
   towel: boolean;
+  /** how wet the skin looks, 0..1 */
+  wet?: number;
 }
 
-const SKIN = 0xd9a47a;
-const GLOVE = 0x62b8ea;
+const SKIN = 0xd6a07c;
+const GLOVE = 0x58b4e6;
 const SLEEVE = 0x1b8f93;
+const NAIL = 0xe9c0b0;
 
 interface FingerSpec {
   x: number;
+  y: number;
   z: number;
   len: [number, number, number];
   r: number;
-  /** how far each joint can bend at curl = 1 */
   max: [number, number, number];
   spreadAngle: number;
 }
 
 // Right hand, palm down, fingers toward -z, thumb on the -x side. The left hand is built mirrored.
 const FINGERS: FingerSpec[] = [
-  { x: -0.042, z: -0.03, len: [0.034, 0.03, 0.024], r: 0.0108, max: [0.5, 0.8, 0.7], spreadAngle: 0 },
-  { x: -0.031, z: -0.093, len: [0.04, 0.024, 0.02], r: 0.0093, max: [1.35, 1.7, 1.2], spreadAngle: 0.22 },
-  { x: -0.011, z: -0.096, len: [0.044, 0.027, 0.021], r: 0.0096, max: [1.35, 1.7, 1.2], spreadAngle: 0.05 },
-  { x: 0.009, z: -0.093, len: [0.04, 0.025, 0.02], r: 0.0089, max: [1.35, 1.7, 1.2], spreadAngle: -0.1 },
-  { x: 0.027, z: -0.087, len: [0.032, 0.019, 0.017], r: 0.0079, max: [1.35, 1.7, 1.2], spreadAngle: -0.25 },
+  { x: -0.04, y: -0.006, z: -0.022, len: [0.04, 0.032, 0.026], r: 0.0125, max: [0.35, 0.9, 0.9], spreadAngle: 0 },
+  { x: -0.0295, y: 0, z: -0.092, len: [0.042, 0.025, 0.021], r: 0.0102, max: [1.4, 1.75, 1.2], spreadAngle: 0.2 },
+  { x: -0.0095, y: 0, z: -0.096, len: [0.046, 0.029, 0.022], r: 0.0106, max: [1.4, 1.75, 1.2], spreadAngle: 0.04 },
+  { x: 0.0105, y: 0, z: -0.092, len: [0.042, 0.027, 0.021], r: 0.0099, max: [1.4, 1.75, 1.2], spreadAngle: -0.1 },
+  { x: 0.0285, y: 0, z: -0.085, len: [0.034, 0.02, 0.018], r: 0.0088, max: [1.4, 1.75, 1.2], spreadAngle: -0.24 },
 ];
 
-/** soap lather blobs: x, y (palm side < 0, back side > 0), z, radius */
-const FOAM_SPOTS: [number, number, number, number][] = [
-  [-0.02, -0.014, -0.04, 0.02], [0.02, -0.014, -0.05, 0.02], [0, -0.014, -0.075, 0.018], [-0.03, -0.012, -0.09, 0.012], [0.03, -0.012, -0.085, 0.012],
-  [-0.02, 0.014, -0.04, 0.02], [0.02, 0.014, -0.05, 0.02], [0, 0.014, -0.075, 0.018], [-0.03, 0.013, -0.1, 0.012], [0.01, 0.013, -0.11, 0.012], [0.03, 0.013, -0.09, 0.012],
-  [-0.03, 0.01, -0.13, 0.009], [-0.011, 0.01, -0.14, 0.009], [0.009, 0.01, -0.135, 0.009], [0.027, 0.01, -0.12, 0.008],
-];
+/** A tube along -z that is round at both ends and slightly narrower at the far end: one bone of a finger. */
+function bone(len: number, r0: number, r1: number): THREE.BufferGeometry {
+  const cap = 6;
+  const pts: THREE.Vector2[] = [];
+  for (let i = 0; i <= cap; i++) {
+    const a = -Math.PI / 2 + (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r0, Math.sin(a) * r0));
+  }
+  for (let i = 0; i <= cap; i++) {
+    const a = (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r1, len + Math.sin(a) * r1));
+  }
+  const g = new THREE.LatheGeometry(pts, 14);
+  g.rotateX(-Math.PI / 2); // +y -> -z
+  g.scale(1, 0.88, 1); // fingers are a little flatter than they are wide
+  return g;
+}
+
+const ellipsoid = (rx: number, ry: number, rz: number, mat: THREE.Material, x: number, y: number, z: number, rotY = 0): THREE.Mesh => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), mat);
+  m.scale.set(rx, ry, rz);
+  m.position.set(x, y, z);
+  m.rotation.y = rotY;
+  return m;
+};
 
 interface Finger {
   base: THREE.Group;
@@ -59,66 +84,97 @@ interface Finger {
   spec: FingerSpec;
 }
 
+/** a tiny deterministic random generator, so both hands always get the same bubbles */
+const rng = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+
+const BUBBLES = 96;
+
 class HandRig {
   readonly root = new THREE.Group();
   private fingers: Finger[] = [];
-  private foam: { mesh: THREE.Mesh; size: number }[] = [];
+  private bubbles: THREE.InstancedMesh;
+  private bubbleData: { p: THREE.Vector3; size: number; at: number }[] = [];
+  private lastFoam = -1;
   readonly towel: THREE.Mesh;
   readonly cuff: THREE.Mesh;
 
-  constructor(private side: 1 | -1, handMat: THREE.Material, armMat: THREE.Material, sleeveMat: THREE.Material, foamMat: THREE.Material, glove: THREE.Material) {
+  constructor(private side: 1 | -1, handMat: THREE.Material, armMat: THREE.Material, sleeveMat: THREE.Material, foamMat: THREE.Material, glove: THREE.Material, nailMat: THREE.Material) {
     const s = side;
-    const palm = new THREE.Mesh(new RoundedBoxGeometry(0.082, 0.022, 0.092, 2, 0.008), handMat);
-    palm.position.set(0, 0, -0.047);
-    this.root.add(palm);
-    this.root.scale.setScalar(1.1);
+    const root = this.root;
+
+    // palm, the pads at the base of the thumb and little finger, the back of the hand and the wrist
+    root.add(new THREE.Mesh(new RoundedBoxGeometry(0.086, 0.026, 0.094, 3, 0.011), handMat).translateZ(-0.047));
+    root.add(ellipsoid(0.027, 0.019, 0.045, handMat, s * -0.03, -0.01, -0.036, s * 0.3));
+    root.add(ellipsoid(0.018, 0.014, 0.038, handMat, s * 0.031, -0.008, -0.05));
+    root.add(ellipsoid(0.04, 0.013, 0.05, handMat, 0, 0.009, -0.052));
+    root.add(ellipsoid(0.03, 0.021, 0.026, handMat, 0, 0, 0.004));
 
     for (const [i, spec] of FINGERS.entries()) {
       const base = new THREE.Group();
       base.rotation.order = 'YXZ';
-      base.position.set(s * spec.x, i === 0 ? -0.004 : 0, spec.z);
+      base.position.set(s * spec.x, spec.y, spec.z);
       const joints: THREE.Group[] = [];
       let parent: THREE.Object3D = base;
       for (let j = 0; j < 3; j++) {
         const joint = new THREE.Group();
         if (j > 0) joint.position.z = -spec.len[j - 1];
         parent.add(joint);
-        const seg = new THREE.Mesh(new THREE.CapsuleGeometry(spec.r * (1 - j * 0.07), spec.len[j], 3, 8), handMat);
-        seg.rotation.x = Math.PI / 2;
-        seg.position.z = -spec.len[j] / 2;
-        joint.add(seg);
+        const r0 = spec.r * (1 - j * 0.07);
+        const r1 = spec.r * (1 - (j + 1) * 0.07 - 0.03);
+        joint.add(new THREE.Mesh(bone(spec.len[j], r0, r1), handMat));
+        if (j === 2) {
+          // fingernail on the back of the last bone
+          const nail = ellipsoid(r1 * 0.78, r1 * 0.2, spec.len[j] * 0.36, nailMat, 0, r1 * 0.82, -spec.len[j] * 0.7);
+          joint.add(nail);
+        }
         joints.push(joint);
         parent = joint;
       }
-      this.root.add(base);
+      if (i > 0) {
+        // knuckle: bridges the palm and the first bone, so there is no gap when the finger bends
+        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 1.05, 12, 8), handMat);
+        base.add(knuckle);
+      }
+      root.add(base);
       this.fingers.push({ base, joints, spec });
     }
 
     // forearm, scrub sleeve and glove cuff run toward the camera (they leave the screen at the bottom)
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.032, 0.42, 14), armMat);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.034, 0.44, 18), armMat);
     arm.rotation.x = Math.PI / 2;
-    arm.position.z = 0.21;
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.05, 0.14, 16), sleeveMat);
+    arm.position.z = 0.22;
+    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.054, 0.14, 20), sleeveMat);
     sleeve.rotation.x = Math.PI / 2;
-    sleeve.position.z = 0.38;
-    this.cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.036, 0.11, 14), glove);
+    sleeve.position.z = 0.4;
+    this.cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.037, 0.11, 18), glove);
     this.cuff.rotation.x = Math.PI / 2;
-    this.cuff.position.z = 0.04;
+    this.cuff.position.z = 0.045;
     this.cuff.visible = false;
-    this.root.add(arm, sleeve, this.cuff);
+    root.add(arm, sleeve, this.cuff);
 
-    for (const [x, y, z, r] of FOAM_SPOTS) {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), foamMat);
-      m.position.set(s * x, y, z);
-      m.visible = false;
-      this.root.add(m);
-      this.foam.push({ mesh: m, size: r });
+    // soap bubbles: small, many, spread over the palm, the back of the hand and the fingers
+    const rand = rng(side === 1 ? 7 : 13);
+    for (let i = 0; i < BUBBLES; i++) {
+      const where = i % 3; // 0 palm, 1 back, 2 fingers
+      let p: THREE.Vector3;
+      if (where === 0) p = new THREE.Vector3((rand() - 0.5) * 0.07, -0.016, -0.01 - rand() * 0.085);
+      else if (where === 1) p = new THREE.Vector3((rand() - 0.5) * 0.07, 0.02, -0.01 - rand() * 0.085);
+      else {
+        const f = FINGERS[1 + Math.floor(rand() * 4)];
+        p = new THREE.Vector3(s * f.x, f.r * 0.9, f.z - rand() * (f.len[0] + f.len[1]));
+      }
+      this.bubbleData.push({ p, size: 0.0024 + rand() * 0.0052, at: rand() });
     }
+    this.bubbles = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), foamMat, BUBBLES);
+    this.bubbles.frustumCulled = false;
+    root.add(this.bubbles);
+    this.setFoam(0);
 
     this.towel = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.003, 0.2), new THREE.MeshLambertMaterial({ color: 0xf6f4ee }));
-    this.towel.position.set(0, -0.019, -0.075);
+    this.towel.position.set(0, -0.021, -0.075);
     this.towel.visible = false;
-    this.root.add(this.towel);
+    root.add(this.towel);
+    root.scale.setScalar(1.12);
   }
 
   /** Bend the fingers (curl 0..1 each) and fan them out. */
@@ -127,7 +183,8 @@ class HandRig {
     this.fingers.forEach((f, i) => {
       const c = curl[i];
       if (i === 0) {
-        f.base.rotation.set(-0.3 * c, s * (0.55 - c * 1.2 + spread * 0.25), 0);
+        // the thumb swings across the palm as it curls
+        f.base.rotation.set(-0.25 * c, s * (0.62 - c * 1.2 + spread * 0.2), 0);
       } else {
         f.base.rotation.set(0, s * f.spec.spreadAngle * spread, 0);
       }
@@ -138,18 +195,24 @@ class HandRig {
   }
 
   setFoam(level: number): void {
-    this.foam.forEach((f, i) => {
-      const v = THREE.MathUtils.clamp(level * 1.25 - (i % 5) * 0.06, 0, 1);
-      f.mesh.visible = v > 0.03;
-      f.mesh.scale.setScalar(f.size * (0.4 + v * 0.5));
+    if (Math.abs(level - this.lastFoam) < 0.012) return;
+    this.lastFoam = level;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    this.bubbleData.forEach((b, i) => {
+      const on = level > b.at * 0.85 + 0.02;
+      const size = on ? b.size * (0.7 + level * 0.7) : 0;
+      m.compose(b.p, q, new THREE.Vector3(size, size, size));
+      this.bubbles.setMatrixAt(i, m);
     });
+    this.bubbles.instanceMatrix.needsUpdate = true;
   }
 }
 
 const IDLE_R: HandPose = { pos: [0.16, -0.52, -0.3], rot: [0.5, 0, 0], curl: [0.3, 0.35, 0.35, 0.35, 0.35], spread: 0 };
 
-export const mirrorHand = (h: HandPose): HandPose => ({ pos: [-h.pos[0], h.pos[1], h.pos[2]], rot: [h.rot[0], -h.rot[1], -h.rot[2]], curl: h.curl, spread: h.spread });
-export const IDLE_POSE: HandsPose = { r: IDLE_R, l: mirrorHand(IDLE_R), foam: 0, towel: false };
+export const mirrorHand = (h: HandPose): HandPose => ({ pos: [-h.pos[0], h.pos[1], h.pos[2]], rot: [h.rot[0], -h.rot[1], -h.rot[2]], curl: h.curl, spread: h.spread, tilt: -(h.tilt ?? 0), lean: h.lean ?? 0 });
+export const IDLE_POSE: HandsPose = { r: IDLE_R, l: mirrorHand(IDLE_R), foam: 0, towel: false, wet: 0 };
 
 interface HandState {
   pos: THREE.Vector3;
@@ -158,7 +221,14 @@ interface HandState {
   spread: number;
 }
 
-const toQuat = (rot: Vec3) => new THREE.Quaternion().setFromEuler(new THREE.Euler(rot[0], rot[1], rot[2], 'YXZ'));
+const xAxis = new THREE.Vector3(1, 0, 0);
+const zAxis = new THREE.Vector3(0, 0, 1);
+const toQuat = (h: HandPose) => {
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(h.rot[0], h.rot[1], h.rot[2], 'YXZ'));
+  if (h.tilt) q.premultiply(new THREE.Quaternion().setFromAxisAngle(zAxis, h.tilt));
+  if (h.lean) q.premultiply(new THREE.Quaternion().setFromAxisAngle(xAxis, h.lean));
+  return q;
+};
 
 /**
  * The nurse's own hands, drawn over the room in a second pass (so they never clip into walls). Give it a target pose
@@ -172,33 +242,43 @@ export class Hands {
 
   private right: HandRig;
   private left: HandRig;
-  private handMat = new THREE.MeshLambertMaterial({ color: SKIN });
-  private glove = new THREE.MeshLambertMaterial({ color: GLOVE });
+  private skin = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.62, metalness: 0 });
   private state: { r: HandState; l: HandState };
   private target: HandsPose = IDLE_POSE;
   private foam = 0;
+  private wet = 0;
   private wanted = false;
 
   constructor() {
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9aa2, 2.4));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    sun.position.set(0.3, 1, 0.6);
-    this.scene.add(sun);
+    this.scene.add(new THREE.HemisphereLight(0xfff3e8, 0x7d8c94, 1.5));
+    const key = new THREE.DirectionalLight(0xffffff, 2.1);
+    key.position.set(-0.5, 1, 0.7);
+    const fill = new THREE.DirectionalLight(0xcfe3ff, 0.7);
+    fill.position.set(0.8, -0.2, 0.5);
+    this.scene.add(key, fill);
 
-    const arm = new THREE.MeshLambertMaterial({ color: SKIN });
+    const arm = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.64 });
     const sleeve = new THREE.MeshLambertMaterial({ color: SLEEVE });
-    const foam = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x555555 });
-    this.right = new HandRig(1, this.handMat, arm, sleeve, foam, this.glove);
-    this.left = new HandRig(-1, this.handMat, arm, sleeve, foam, this.glove);
+    const foam = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.12, emissive: 0x3a3f44 });
+    const glove = new THREE.MeshStandardMaterial({ color: GLOVE, roughness: 0.35 });
+    const nail = new THREE.MeshStandardMaterial({ color: NAIL, roughness: 0.3 });
+    this.skinArm = arm;
+    this.glove = glove;
+    this.right = new HandRig(1, this.skin, arm, sleeve, foam, glove, nail);
+    this.left = new HandRig(-1, this.skin, arm, sleeve, foam, glove, nail);
     this.scene.add(this.right.root, this.left.root);
-    const init = (h: HandPose): HandState => ({ pos: new THREE.Vector3(...h.pos), quat: toQuat(h.rot), curl: [...h.curl], spread: h.spread });
+    const init = (h: HandPose): HandState => ({ pos: new THREE.Vector3(...h.pos), quat: toQuat(h), curl: [...h.curl], spread: h.spread });
     this.state = { r: init(IDLE_POSE.r), l: init(IDLE_POSE.l) };
     this.place();
   }
 
+  private skinArm: THREE.MeshStandardMaterial;
+  private glove: THREE.MeshStandardMaterial;
+
   /** Hands in the gloves (blue nitrile) or bare. */
   setGloves(on: boolean): void {
-    this.handMat.color.setHex(on ? GLOVE : SKIN);
+    this.skin.color.setHex(on ? GLOVE : SKIN);
+    this.skin.roughness = on ? 0.35 : 0.62;
     this.right.cuff.visible = on;
     this.left.cuff.visible = on;
   }
@@ -243,9 +323,14 @@ export class Hands {
     this.scene.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();
-      const mat = m.material as THREE.Material | undefined;
-      if (mat) mat.dispose();
     });
+    const mats = new Set<THREE.Material>();
+    this.scene.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) mat.forEach((x) => mats.add(x));
+      else if (mat) mats.add(mat);
+    });
+    mats.forEach((m) => m.dispose());
   }
 
   private step(k: number): void {
@@ -253,11 +338,15 @@ export class Hands {
     for (const [key, hand] of [['r', t.r], ['l', t.l]] as const) {
       const s = this.state[key];
       s.pos.lerp(new THREE.Vector3(...hand.pos), k);
-      s.quat.slerp(toQuat(hand.rot), k);
+      s.quat.slerp(toQuat(hand), k);
       for (let i = 0; i < 5; i++) s.curl[i] += (hand.curl[i] - s.curl[i]) * k;
       s.spread += (hand.spread - s.spread) * k;
     }
     this.foam += (t.foam - this.foam) * Math.min(1, k * 0.5);
+    this.wet += ((t.wet ?? 0) - this.wet) * Math.min(1, k * 0.4);
+    // wet skin is shinier
+    this.skin.roughness = THREE.MathUtils.lerp(0.62, 0.3, this.wet);
+    this.skinArm.roughness = this.skin.roughness;
     this.right.towel.visible = t.towel;
     this.place();
   }
