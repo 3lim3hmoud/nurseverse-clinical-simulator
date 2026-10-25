@@ -30,7 +30,7 @@ describe('WHO hand-washing technique', () => {
   });
 
   it('runs the water only to wet and rinse (and until the towel closes the tap)', () => {
-    const water = (id: string, u: number) => WASH_STEPS.find((s) => s.id === id)!.water(u);
+    const water = (id: string, u: number) => WASH_STEPS.find((s) => s.id === id)!.water?.(u);
     expect(water('wet', 0.5)).toBe(true);
     expect(water('rinse', 0.5)).toBe(true);
     for (const id of ['soap', 'palms', 'dorsum', 'interlaced', 'fingerbacks', 'thumbs', 'fingertips', 'wrists']) expect(water(id, 0.5)).toBe(false);

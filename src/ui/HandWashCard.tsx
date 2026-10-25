@@ -1,8 +1,8 @@
-import type { WashProgress } from '../game/hands/HandWashRun';
+import type { RunProgress } from '../game/hands/HandsRun';
 import { useI18n } from '../i18n';
 
 interface Props {
-  progress: WashProgress;
+  progress: RunProgress;
   fast: boolean;
   /** practice mode may speed the wash up; the exam always runs it in full */
   canSpeedUp: boolean;

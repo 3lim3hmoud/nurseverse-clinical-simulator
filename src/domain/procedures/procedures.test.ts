@@ -166,7 +166,7 @@ describe('exam', () => {
     expect(s.items.filter((i) => i.extra)).toHaveLength(6);
     expect(s.actions).toHaveLength(s.def.steps.length + 3);
     expect(s.actions.filter((a) => a.stepIndex === null)).toHaveLength(3);
-    expect(s.limitSec).toBe(13 * 50 + 120);
+    expect(s.limitSec).toBe(13 * 50 + 120 + 240);
   });
   it('picking a distractor item or step is an error', () => {
     const s = newSession('mv', 'exam', 7);

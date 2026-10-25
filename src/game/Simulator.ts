@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { Hands } from './hands/Hands';
-import { HandWashRun, type WashProgress } from './hands/HandWashRun';
+import { HandsRun, type RunProgress, type RunEnv } from './hands/HandsRun';
+import { WASH_STEPS } from './hands/handWashClips';
+import { DON_STEPS, DOFF_STEPS } from './hands/ppeClips';
+import { BEDSIDE, bedsideScriptFor } from './hands/bedsideClips';
+import type { ScriptStep } from './hands/handsScript';
 import type { HandWashSink } from './world/HandWashSink';
 import { accelerateRaycast } from './world/accelerate';
 import { ALERT_TEXT_EN, criticalAlerts, type AlertCode } from '../domain/patient/alarms';
@@ -39,6 +43,8 @@ const HEAD_RAISED = 1.0; // radians (~57°), high Fowler's
 const LEGS_RAISED = 0.5; // radians (~29°)
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+const PI_L = Math.PI * 0.9;
+
 /** Lowest render scale the resolution governor will use. */
 const MIN_QUALITY = 0.65;
 
@@ -54,7 +60,8 @@ export class Simulator {
   private resizeObserver: ResizeObserver;
   /** The nurse's own hands, drawn over the room while she does something with them. */
   readonly hands = new Hands();
-  private wash: HandWashRun | null = null;
+  private run: HandsRun | null = null;
+  private ventilator: THREE.Object3D | null = null;
   private sink: { unit: HandWashSink; x: number; z: number } | null = null;
 
   private running = false;
@@ -98,7 +105,7 @@ export class Simulator {
       onLockChange: (locked) => {
         if (!locked) {
           this.interaction.clear();
-          this.cancelHandWash();
+          this.cancelHands();
         }
         callbacks.onLockChange(locked);
       },
@@ -180,61 +187,120 @@ export class Simulator {
     this.controller.addLook(dx, dy);
   }
 
-  // ---- hand washing at the sink (procedure mode) ----
+  // ---- scripted hand work: hand washing and PPE at the sink, tasks at the bedside (procedure mode) ----
 
   /** Tell the simulator where the hand-wash sink stands (room position of its origin). */
   setHandWashSink(unit: HandWashSink, x: number, z: number): void {
     this.sink = { unit, x, z };
   }
 
-  /**
-   * Walk to the sink and wash the hands with the WHO technique. `onDone` is called when the wash is complete;
-   * a cancelled wash (Esc) never calls it. Returns false when the room has no sink.
-   */
-  startHandWash(onProgress: (p: WashProgress) => void, onDone: () => void, speed = 1): boolean {
-    if (!this.sink || this.wash?.active) return false;
-    const { unit, x, z } = this.sink;
-    const a = unit.anchors;
-    const at = (v: THREE.Vector3) => new THREE.Vector3(x + v.x, v.y, z + v.z);
-    this.wash = new HandWashRun(
-      {
-        hands: this.hands,
-        camera: this.camera,
-        driveTo: (px, pz, k) => this.controller.driveTo(px, pz, k),
-        lookAt: (lx, ly, lz, k) => this.controller.lookToward(lx, ly, lz, k),
-        distanceTo: (px, pz) => this.controller.distanceTo(px, pz),
-        setScripted: (on) => {
-          this.controller.scripted = on;
-        },
-        setWater: (on) => unit.setWater(on),
-        stand: new THREE.Vector3(x, 0, z + a.standZ),
-        basin: at(a.basin),
-        anchorsWorld: { tap: at(a.tap), soap: at(a.soap), towel: at(a.towel) },
+  /** The ventilator the nurse turns the dial on. */
+  setVentilatorAnchor(obj: THREE.Object3D | null): void {
+    this.ventilator = obj;
+  }
+
+  private runEnv(stand: THREE.Vector3, anchors: () => Record<string, THREE.Vector3>, lookDefault: string, water?: (on: boolean) => void): RunEnv {
+    return {
+      hands: this.hands,
+      camera: this.camera,
+      driveTo: (px, pz, k) => this.controller.driveTo(px, pz, k),
+      lookAt: (lx, ly, lz, k) => this.controller.lookToward(lx, ly, lz, k),
+      distanceTo: (px, pz) => this.controller.distanceTo(px, pz),
+      setScripted: (on) => {
+        this.controller.scripted = on;
       },
-      onProgress,
-      onDone,
-    );
-    this.wash.speed = speed;
+      setWater: (on) => water?.(on),
+      stand,
+      lookDefault,
+      anchorsWorld: anchors,
+    };
+  }
+
+  private begin(env: RunEnv, steps: readonly ScriptStep[], onProgress: (p: RunProgress) => void, onDone: () => void, speed: number): boolean {
+    if (this.run?.active) return false;
+    this.run = new HandsRun(env, steps, onProgress, onDone);
+    this.run.speed = speed;
     this.interaction.clear();
     return true;
   }
 
-  setHandWashSpeed(speed: number): void {
-    if (this.wash) this.wash.speed = speed;
+  /**
+   * Walk to the sink and wash the hands with the WHO technique. `ppe` adds what goes with it: put the mask, goggles and
+   * gloves on afterwards ('don'), or take the gloves, goggles and mask off first ('doff', plus documenting at the end).
+   * `onDone` is called when everything is finished; a cancelled run (Esc) never calls it. Returns false without a sink.
+   */
+  startHandWash(onProgress: (p: RunProgress) => void, onDone: () => void, speed = 1, ppe: 'none' | 'don' | 'doff' = 'none'): boolean {
+    if (!this.sink) return false;
+    const { unit, x, z } = this.sink;
+    const a = unit.anchors;
+    const at = (v: THREE.Vector3) => new THREE.Vector3(x + v.x, v.y, z + v.z);
+    const steps = ppe === 'don' ? [...WASH_STEPS, ...DON_STEPS] : ppe === 'doff' ? [...DOFF_STEPS, ...WASH_STEPS, ...BEDSIDE.document()] : WASH_STEPS;
+    const env = this.runEnv(
+      new THREE.Vector3(x, 0, z + a.standZ),
+      () => ({ basin: at(a.basin), tap: at(a.tap), soap: at(a.soap), towel: at(a.towel), bin: new THREE.Vector3(x + 0.62, 0.45, z + 0.02) }),
+      'basin',
+      (on) => unit.setWater(on),
+    );
+    return this.begin(env, steps, onProgress, onDone, speed);
   }
 
-  cancelHandWash(): void {
-    this.wash?.cancel();
-    this.wash = null;
+  /** Does this step of the procedure have a hand movement to show? */
+  hasBedsideScript(stepEn: string): boolean {
+    return bedsideScriptFor(stepEn) !== null;
   }
 
-  get washing(): boolean {
-    return this.wash?.active === true;
+  /** Walk to the bedside and do the task of a step with the hands (suction, listening to the chest, ...). */
+  startBedside(stepEn: string, onProgress: (p: RunProgress) => void, onDone: () => void, speed = 1): boolean {
+    const script = bedsideScriptFor(stepEn);
+    if (!script) return false;
+    const mouth = this.mouthWorld();
+    const stand = new THREE.Vector3(mouth.x + 0.85, 0, mouth.z + 0.5);
+    const env = this.runEnv(stand, () => {
+      const m = this.mouthWorld();
+      const chest = new THREE.Vector3(m.x, m.y - 0.12, m.z + 0.42);
+      return {
+        mouth: m,
+        chest,
+        wrist: new THREE.Vector3(chest.x + 0.3, chest.y - 0.06, chest.z + 0.4),
+        vent: this.ventilator ? this.ventilator.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(m.x - 0.9, m.y + 0.2, m.z - 0.3),
+        basin: new THREE.Vector3(0, 0.9, 2.2),
+      };
+    }, 'mouth');
+    return this.begin(env, script.steps, onProgress, onDone, speed);
+  }
+
+  /** A quick reach and grab when something is taken from a table (does not take over the camera). */
+  pickGesture(): void {
+    if (this.run?.active) return;
+    this.hands.playGesture(0.9, (u) => {
+      const reach = Math.min(1, u / 0.35);
+      const lift = Math.min(1, Math.max(0, (u - 0.35) / 0.3));
+      const away = Math.min(1, Math.max(0, (u - 0.7) / 0.3));
+      const k = reach * reach * (3 - 2 * reach);
+      const l = lift * lift * (3 - 2 * lift);
+      const pos: [number, number, number] = [0.14 - 0.09 * l, -0.36 + 0.26 * k - 0.0 * l - 0.3 * away + 0.04 * l, -0.34];
+      const r = { pos, rot: [0.35, 0.1, 0] as [number, number, number], curl: [0.2 + 0.4 * k, 0.15 + 0.5 * k, 0.15 + 0.5 * k, 0.2 + 0.5 * k, 0.25 + 0.5 * k] as [number, number, number, number, number], spread: 0.2 * (1 - k) };
+      const lh = { pos: [-0.16, -0.5 + 0.1 * l - 0.15 * away, -0.3] as [number, number, number], rot: [0.5, 0, PI_L] as [number, number, number], curl: [0.3, 0.3, 0.3, 0.3, 0.3] as [number, number, number, number, number], spread: 0 };
+      return { r, l: lh, foam: 0, held: k > 0.8 && away < 0.8 ? 'box' : null, wet: 0 };
+    });
+  }
+
+  setHandsSpeed(speed: number): void {
+    if (this.run) this.run.speed = speed;
+  }
+
+  cancelHands(): void {
+    this.run?.cancel();
+    this.run = null;
+  }
+
+  get handsBusy(): boolean {
+    return this.run?.active === true;
   }
 
   /** Same as pressing E. */
   interact(): void {
-    if (!this.controller.locked || this.wash?.active) return;
+    if (!this.controller.locked || this.run?.active) return;
     this.use(this.interaction.refresh());
   }
 
@@ -439,12 +505,12 @@ export class Simulator {
 
     if (this.focusAt && this.clock.elapsedTime < this.focusUntil) this.controller.lookToward(this.focusAt.x, this.focusAt.y, this.focusAt.z, 1 - Math.exp(-5 * dt));
     else this.focusAt = null;
-    this.wash?.update(dt);
+    this.run?.update(dt);
     this.controller.update(dt);
     this.camera.updateMatrixWorld();
     this.sink?.unit.update(dt);
     this.hands.update(dt);
-    if (this.controller.locked && !this.wash?.active) this.interaction.update(dt);
+    if (this.controller.locked && !this.run?.active) this.interaction.update(dt);
 
     if (vitals !== this.lastVitals) {
       this.lastVitals = vitals;
@@ -535,7 +601,7 @@ export class Simulator {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (this.wash?.active) return; // hands are busy
+    if (this.run?.active) return; // hands are busy
     if (e.code === 'KeyE' && !e.repeat && this.controller.locked) this.use(this.interaction.refresh());
   };
 
